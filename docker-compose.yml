@@ -1,0 +1,34 @@
+version: '3.8'
+
+services:
+  localstack:
+    image: localstack/localstack:3.0
+    container_name: fpl-localstack
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=s3,dynamodb,stepfunctions,events,sns,lambda
+      - DEBUG=0
+      - PERSISTENCE=1
+      - DATA_DIR=/var/lib/localstack/data
+    volumes:
+      - "./localstack-data:/var/lib/localstack/data"
+      - "/var/run/docker.sock:/var/run/docker.sock"
+    networks:
+      - fpl-network
+
+  dynamodb-admin:
+    image: aaronshaf/dynamodb-admin
+    container_name: fpl-dynamodb-admin
+    ports:
+      - "8001:8001"
+    environment:
+      - DYNAMO_ENDPOINT=http://localstack:4566
+    depends_on:
+      - localstack
+    networks:
+      - fpl-network
+
+networks:
+  fpl-network:
+    driver: bridge
