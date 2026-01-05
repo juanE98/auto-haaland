@@ -1,168 +1,124 @@
 # Auto-Haaland: FPL ML Prediction System
 
-An automated Fantasy Premier League prediction system using XGBoost and AWS. Fetches live FPL data, engineers features, trains ML models, and delivers predictions via API.
+An automated Fantasy Premier League prediction system using XGBoost and AWS.
 
 ## Features
 
-- **FPL API Integration**: Rate-limited client with exponential backoff
-- **Data Pipeline**: Lambda functions for fetching and processing player data
-- **ML Training**: XGBoost models on SageMaker with hyperparameter tuning
-- **Predictions**: Daily batch predictions stored in DynamoDB
-- **API**: REST endpoints for retrieving predictions
-- **Local Development**: LocalStack for AWS service emulation
+- Fetches live FPL data via API with rate limiting
+- Lambda-based data pipeline for processing player statistics
+- XGBoost model training on SageMaker
+- Batch predictions stored in DynamoDB
+- REST API for retrieving predictions
+- Full local development environment with LocalStack
 
 ## Quick Start
 
-### 1. Environment Setup
-
-Run the automated setup script:
+### Setup
 
 ```bash
+# Automated setup (requires sudo)
 ./setup.sh
-```
 
-This installs system packages (python3-venv, docker-compose), creates a virtual environment, and installs dependencies.
-
-**Manual setup:**
-```bash
+# Or manual setup
 sudo apt install python3.12-venv docker-compose
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements-dev.txt
 ```
 
-### 2. Testing
+### Testing
 
 ```bash
 # Test with real FPL API
 source venv/bin/activate
 python scripts/test_real_fpl_api.py
 
-# Run unit tests (fast)
-make test-unit
-
-# Run integration tests (starts/stops LocalStack automatically)
-make test-integration
-
 # Run all tests
 make test
+
+# Run specific test suites
+make test-unit          # Unit tests (fast)
+make test-integration   # Integration tests (with LocalStack)
 ```
 
-### 3. Local Development
+### Local Development
 
 ```bash
-# Start LocalStack (AWS emulation)
-make local-up
-
-# Stop LocalStack
-make local-down
-
-# View logs
-make local-logs
+make local-up    # Start LocalStack (S3, DynamoDB)
+make local-down  # Stop LocalStack
+make local-logs  # View logs
+make help        # See all commands
 ```
 
-LocalStack provides:
-- S3 at `http://localhost:4566`
-- DynamoDB Admin UI at `http://localhost:8001`
+LocalStack runs at:
+- S3: `http://localhost:4566`
+- DynamoDB Admin UI: `http://localhost:8001`
+
+## Architecture
+
+```
+EventBridge (6pm AEST) → Step Functions → Lambda: Fetch Data
+                                        → Lambda: Feature Engineering
+                                        → SageMaker: Train Model
+                                        → Lambda: Batch Predictions
+                                        → DynamoDB Storage
+                                        → API Gateway + Lambda
+```
+
+See [fpl-ml-aws-architecture.md](./fpl-ml-aws-architecture.md) for details.
 
 ## Project Structure
 
 ```
 auto-haaland/
 ├── lambdas/
-│   ├── common/
-│   │   ├── fpl_api.py       # FPL API client with rate limiting
-│   │   └── aws_clients.py   # AWS client factories
-│   └── data_fetcher/
-│       └── handler.py        # Fetch bootstrap, fixtures, player data
+│   ├── common/              # FPL API client, AWS utilities
+│   └── data_fetcher/        # Lambda handler for data fetching
 ├── tests/
-│   ├── unit/                 # 18 unit tests
-│   └── integration/          # 5 integration tests with mocked S3
+│   ├── unit/                # 18 unit tests
+│   └── integration/         # 5 integration tests
 ├── scripts/
-│   └── test_real_fpl_api.py  # Real API verification
-├── docker-compose.yml        # LocalStack configuration
-├── Makefile                  # Development commands
-└── setup.sh                  # Automated environment setup
+│   └── test_real_fpl_api.py # Real API verification
+├── docker-compose.yml       # LocalStack configuration
+├── Makefile                 # Development commands
+└── setup.sh                 # Automated setup
 ```
-
-## Architecture
-
-```
-EventBridge (6pm AEST Brisbane)
-    ↓
-Step Functions (Orchestration)
-    ↓
-Lambda: Fetch FPL Data → Lambda: Feature Engineering
-    ↓
-SageMaker: Train Model → Batch Predictions
-    ↓
-DynamoDB (Predictions Store)
-    ↓
-API Gateway + Lambda (REST API)
-```
-
-See [fpl-ml-aws-architecture.md](./fpl-ml-aws-architecture.md) for detailed architecture.
 
 ## Data Storage
 
-Raw JSON stored in S3:
 ```
-s3://fpl-ml-data/raw/season_2025_26/
-├── gw20_bootstrap.json       # All players, teams, gameweeks
-├── gw20_fixtures.json        # Fixtures for GW20
-└── gw20_players/
-    ├── player_381.json       # Salah's history
-    └── player_*.json         # Other players
-```
-
-## Available Commands
-
-```bash
-make help                # Show all commands
-make setup              # Install dependencies
-make test               # Run all tests
-make test-unit          # Run unit tests
-make test-integration   # Run integration tests (with LocalStack)
-make local-up           # Start LocalStack
-make local-down         # Stop LocalStack
-make local-logs         # View LocalStack logs
-make clean              # Remove build artifacts
+s3://fpl-ml-data/raw/season_YYYY_YY/
+├── gwN_bootstrap.json       # Players, teams, gameweeks
+├── gwN_fixtures.json        # Fixtures for gameweek N
+└── gwN_players/
+    └── player_*.json        # Individual player histories
 ```
 
 ## Technology Stack
 
-**Backend:**
 - Python 3.12
-- AWS Lambda, S3, DynamoDB, SageMaker, Step Functions
-- XGBoost for ML predictions
+- AWS: Lambda, S3, DynamoDB, SageMaker, Step Functions
+- XGBoost for predictions
+- LocalStack for local AWS emulation
+- pytest + moto for testing
 
-**Development:**
-- LocalStack for AWS emulation
-- pytest with moto for S3 mocking
-- Docker Compose for local infrastructure
+## Testing
 
-**Dependencies:**
-- boto3, httpx, pandas, pyarrow, numpy
-- xgboost, scikit-learn
-- pytest, black, flake8, mypy
+- 60% Unit Tests (fast, no dependencies)
+- 30% Integration Tests (LocalStack/moto)
+- 10% E2E Tests (real AWS, minimal)
 
-## Testing Philosophy
-
-- **60% Unit Tests**: Fast, no external dependencies
-- **30% Integration Tests**: LocalStack/moto for AWS services
-- **10% E2E Tests**: Real AWS (minimal, cost-effective)
-
-**Current coverage:** 23/23 tests passing
+Current: 23/23 tests passing
 
 ## Cost Estimate
 
-- **Development**: ~$3-6 (local testing + SageMaker validation)
-- **Production**: ~$40-60/year (~$0.60 per gameweek)
+- **Development**: ~$3-6
+- **Production**: ~$40-60/year (~$0.60/gameweek)
 
 ## Documentation
 
-- [Implementation Plan](./implementation-plan.md) - Development roadmap and testing strategy
-- [Architecture](./fpl-ml-aws-architecture.md) - AWS infrastructure design
+- [Implementation Plan](./implementation-plan.md)
+- [Architecture](./fpl-ml-aws-architecture.md)
 
 ## License
 
