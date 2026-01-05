@@ -1,11 +1,11 @@
 <mxfile host="app.diagrams.net" agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36" version="29.2.9">
   <diagram name="FPL ML AWS Architecture" id="aws-fpl-architecture">
-    <mxGraphModel dx="1426" dy="763" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1200" math="0" shadow="0">
+    <mxGraphModel dx="1678" dy="898" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1200" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
         <mxCell id="background" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=none;" value="" vertex="1">
-          <mxGeometry height="1120" width="1520" x="40" y="40" as="geometry" />
+          <mxGeometry height="960" width="1380" x="40" y="40" as="geometry" />
         </mxCell>
         <mxCell id="title" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=22;" value="&lt;b&gt;Auto-Haaland: FPL ML Prediction System&lt;/b&gt;" vertex="1">
           <mxGeometry height="40" width="600" x="500" y="60" as="geometry" />
@@ -260,7 +260,7 @@
         <mxCell id="legend-dashed-label" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=11;" value="Read/Query" vertex="1">
           <mxGeometry height="20" width="100" x="1230" y="260" as="geometry" />
         </mxCell>
-        <mxCell id="legend-schedule" parent="1" style="text;html=1;strokeColor=#9673a6;fillColor=#e1d5e7;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=1;fontSize=11;" value="Runs: 6pm AEST Brisbane" vertex="1">
+        <mxCell id="legend-schedule" parent="1" style="text;html=1;strokeColor=#9673a6;fillColor=#e1d5e7;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=1;fontSize=11;" value="Runs: 6pm AEST after each gameweek finishes" vertex="1">
           <mxGeometry height="35" width="180" x="1140" y="330" as="geometry" />
         </mxCell>
       </root>

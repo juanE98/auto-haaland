@@ -2,6 +2,9 @@
 
 An automated Fantasy Premier League prediction system using XGBoost and AWS.
 
+## Purpose
+ - Play around with AWS and its ML services
+
 ## Features
 
 - Fetches live FPL data via API with rate limiting
