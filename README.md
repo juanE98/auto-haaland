@@ -68,7 +68,14 @@ LocalStack runs at:
 
 ## Architecture
 
-![AWS Architecture Diagram](./aws-architecture-diagram.png)
+```
+EventBridge (6pm AEST) → Step Functions → Lambda: Fetch Data
+                                        → Lambda: Feature Engineering
+                                        → SageMaker: Train Model
+                                        → Lambda: Batch Predictions
+                                        → DynamoDB Storage
+                                        → API Gateway + Lambda
+```
 
 See [fpl-ml-aws-architecture.md](./fpl-ml-aws-architecture.md) for details.
 
@@ -118,11 +125,6 @@ s3://fpl-ml-data/raw/season_YYYY_YY/
 
 - **Development**: ~$3-6
 - **Production**: (~$0.60/gameweek)
-
-## Documentation
-
-- [Implementation Plan](./implementation-plan.md)
-- [Architecture](./fpl-ml-aws-architecture.md)
 
 ## License
 
