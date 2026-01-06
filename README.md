@@ -68,14 +68,7 @@ LocalStack runs at:
 
 ## Architecture
 
-```
-EventBridge (6pm AEST) → Step Functions → Lambda: Fetch Data
-                                        → Lambda: Feature Engineering
-                                        → SageMaker: Train Model
-                                        → Lambda: Batch Predictions
-                                        → DynamoDB Storage
-                                        → API Gateway + Lambda
-```
+![AWS Architecture Diagram](./aws-architecture-diagram.png)
 
 See [fpl-ml-aws-architecture.md](./fpl-ml-aws-architecture.md) for details.
 
