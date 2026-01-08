@@ -121,7 +121,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 logger.info(f"Processing {player_count} players...")
 
                 # Limit to avoid timeouts (Lambda has 15 min max)
-                # We'll batch this or use separate invocations in production
+                # TODO: Batch this or use separate invocations in production
                 max_players = min(player_count, 50)  # Start with 50 for testing
 
                 for i, player in enumerate(players[:max_players]):

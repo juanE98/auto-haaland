@@ -232,4 +232,4 @@ class TestFPLApiClient:
             assert hasattr(client, 'client')
 
         # Client should be closed after exiting context
-        # (We can't easily test this without mocking)
+        # (Cannot easily test this without mocking)
