@@ -118,7 +118,3 @@ s3://fpl-ml-data/raw/season_YYYY_YY/
 
 - **Development**: ~$3-6
 - **Production**: (~$0.60/gameweek)
-
-## License
-
-MIT
