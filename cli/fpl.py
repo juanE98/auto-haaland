@@ -1,0 +1,325 @@
+"""FPL Prediction CLI - Query predictions and trigger pipeline."""
+
+import json
+import os
+import sys
+
+import boto3
+import click
+import httpx
+from tabulate import tabulate
+
+
+class FPLClient:
+    """HTTP client for FPL Prediction API."""
+
+    def __init__(self, base_url: str):
+        self.base_url = base_url.rstrip("/")
+
+    def get_top(
+        self, gameweek: int, position: str | None = None, limit: int = 10
+    ) -> dict:
+        """Get top predicted scorers for a gameweek."""
+        params = {"gameweek": gameweek, "limit": limit}
+        if position:
+            params["position"] = position
+        return self._get("/top", params)
+
+    def get_player(self, player_id: int, gameweek: int | None = None) -> dict:
+        """Get predictions for a specific player."""
+        params = {"gameweek": gameweek} if gameweek else {}
+        return self._get(f"/predictions/{player_id}", params)
+
+    def compare(self, player_ids: list[int], gameweek: int) -> dict:
+        """Compare multiple players for a gameweek."""
+        params = {"players": ",".join(map(str, player_ids)), "gameweek": gameweek}
+        return self._get("/compare", params)
+
+    def get_predictions(self, gameweek: int, limit: int = 100) -> dict:
+        """Get all predictions for a gameweek."""
+        params = {"gameweek": gameweek, "limit": limit}
+        return self._get("/predictions", params)
+
+    def _get(self, path: str, params: dict) -> dict:
+        """Make GET request to API."""
+        url = f"{self.base_url}{path}"
+        response = httpx.get(url, params=params, timeout=30.0)
+        response.raise_for_status()
+        return response.json()
+
+
+def format_points(points: float) -> str:
+    """Format predicted points for display."""
+    return f"{points:.1f}"
+
+
+@click.group()
+@click.option(
+    "--endpoint",
+    envvar="API_ENDPOINT",
+    help="API Gateway URL (or set API_ENDPOINT env var)",
+)
+@click.option(
+    "--local",
+    is_flag=True,
+    help="Use local API at http://localhost:3000",
+)
+@click.pass_context
+def cli(ctx, endpoint: str | None, local: bool):
+    """FPL Prediction CLI - Query predictions and trigger pipeline."""
+    ctx.ensure_object(dict)
+
+    if local:
+        base_url = "http://localhost:3000"
+    elif endpoint:
+        base_url = endpoint
+    else:
+        base_url = None
+
+    ctx.obj["base_url"] = base_url
+
+
+def get_client(ctx) -> FPLClient:
+    """Get FPLClient from context, validating endpoint is set."""
+    base_url = ctx.obj.get("base_url")
+    if not base_url:
+        click.echo("Error: --endpoint or --local required", err=True)
+        click.echo("Set API_ENDPOINT env var or use --local for local testing", err=True)
+        ctx.exit(1)
+    return FPLClient(base_url)
+
+
+@cli.command()
+@click.option(
+    "--gameweek", "-g",
+    required=True,
+    type=int,
+    help="Gameweek number",
+)
+@click.option(
+    "--position", "-p",
+    type=click.Choice(["GKP", "DEF", "MID", "FWD"], case_sensitive=False),
+    help="Filter by position",
+)
+@click.option(
+    "--limit", "-n",
+    default=10,
+    type=int,
+    help="Number of results (default: 10)",
+)
+@click.pass_context
+def top(ctx, gameweek: int, position: str | None, limit: int):
+    """Get top predicted scorers for a gameweek."""
+    client = get_client(ctx)
+
+    try:
+        data = client.get_top(gameweek, position, limit)
+    except httpx.HTTPStatusError as e:
+        click.echo(f"Error: {e.response.status_code} - {e.response.text}", err=True)
+        ctx.exit(1)
+
+    predictions = data.get("predictions", [])
+    if not predictions:
+        click.echo(f"No predictions found for gameweek {gameweek}")
+        return
+
+    title = f"Top {len(predictions)} Predictions - Gameweek {gameweek}"
+    if position:
+        title += f" ({position})"
+    click.echo(title)
+    click.echo()
+
+    table_data = [
+        [
+            i + 1,
+            p.get("player_name", f"ID: {p['player_id']}"),
+            p.get("position", "-"),
+            format_points(p["predicted_points"]),
+        ]
+        for i, p in enumerate(predictions)
+    ]
+
+    click.echo(tabulate(table_data, headers=["Rank", "Player", "Pos", "Points"]))
+
+
+@cli.command()
+@click.argument("player_id", type=int)
+@click.option(
+    "--gameweek", "-g",
+    type=int,
+    help="Specific gameweek (omit for all)",
+)
+@click.pass_context
+def player(ctx, player_id: int, gameweek: int | None):
+    """Get predictions for a specific player."""
+    client = get_client(ctx)
+
+    try:
+        data = client.get_player(player_id, gameweek)
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 404:
+            click.echo(f"Player {player_id} not found", err=True)
+        else:
+            click.echo(f"Error: {e.response.status_code} - {e.response.text}", err=True)
+        ctx.exit(1)
+
+    player_name = data.get("player_name", f"ID: {player_id}")
+    position = data.get("position", "-")
+
+    click.echo(f"Player: {player_name} (ID: {player_id}) - Position: {position}")
+    click.echo()
+
+    if "predictions" in data:
+        table_data = [
+            [p["gameweek"], format_points(p["predicted_points"])]
+            for p in data["predictions"]
+        ]
+        click.echo(tabulate(table_data, headers=["Gameweek", "Points"]))
+    else:
+        click.echo(f"Gameweek {data['gameweek']}: {format_points(data['predicted_points'])} pts")
+
+
+@cli.command()
+@click.argument("players")
+@click.option(
+    "--gameweek", "-g",
+    required=True,
+    type=int,
+    help="Gameweek number",
+)
+@click.pass_context
+def compare(ctx, players: str, gameweek: int):
+    """Compare multiple players for a gameweek.
+
+    PLAYERS: Comma-separated player IDs (e.g., 328,350,233)
+    """
+    client = get_client(ctx)
+
+    try:
+        player_ids = [int(p.strip()) for p in players.split(",")]
+    except ValueError:
+        click.echo("Error: Invalid player IDs. Use comma-separated numbers.", err=True)
+        ctx.exit(1)
+
+    if len(player_ids) > 15:
+        click.echo("Error: Maximum 15 players allowed", err=True)
+        ctx.exit(1)
+
+    try:
+        data = client.compare(player_ids, gameweek)
+    except httpx.HTTPStatusError as e:
+        click.echo(f"Error: {e.response.status_code} - {e.response.text}", err=True)
+        ctx.exit(1)
+
+    predictions = data.get("predictions", [])
+    missing = data.get("missing", [])
+
+    click.echo(f"Player Comparison - Gameweek {gameweek}")
+    click.echo()
+
+    if predictions:
+        table_data = [
+            [
+                p.get("player_name", f"ID: {p['player_id']}"),
+                p.get("position", "-"),
+                format_points(p["predicted_points"]),
+            ]
+            for p in predictions
+        ]
+        click.echo(tabulate(table_data, headers=["Player", "Pos", "Points"]))
+
+    if missing:
+        click.echo()
+        click.echo(f"Not found: {', '.join(map(str, missing))}")
+
+
+@cli.command()
+@click.option(
+    "--gameweek", "-g",
+    required=True,
+    type=int,
+    help="Gameweek number",
+)
+@click.option(
+    "--limit", "-n",
+    default=100,
+    type=int,
+    help="Number of results (default: 100)",
+)
+@click.pass_context
+def predictions(ctx, gameweek: int, limit: int):
+    """List all predictions for a gameweek."""
+    client = get_client(ctx)
+
+    try:
+        data = client.get_predictions(gameweek, limit)
+    except httpx.HTTPStatusError as e:
+        click.echo(f"Error: {e.response.status_code} - {e.response.text}", err=True)
+        ctx.exit(1)
+
+    preds = data.get("predictions", [])
+    if not preds:
+        click.echo(f"No predictions found for gameweek {gameweek}")
+        return
+
+    click.echo(f"Predictions - Gameweek {gameweek} ({len(preds)} players)")
+    click.echo()
+
+    table_data = [
+        [
+            p["player_id"],
+            p.get("player_name", "-"),
+            p.get("position", "-"),
+            format_points(p["predicted_points"]),
+        ]
+        for p in preds
+    ]
+    click.echo(tabulate(table_data, headers=["ID", "Player", "Pos", "Points"]))
+
+
+@cli.command()
+@click.option(
+    "--state-machine",
+    envvar="STATE_MACHINE_ARN",
+    help="Step Functions state machine ARN (or set STATE_MACHINE_ARN env var)",
+)
+@click.option(
+    "--region",
+    default="ap-southeast-2",
+    help="AWS region (default: ap-southeast-2)",
+)
+def run(state_machine: str | None, region: str):
+    """Trigger the FPL prediction pipeline."""
+    if not state_machine:
+        click.echo("Error: --state-machine or STATE_MACHINE_ARN env var required", err=True)
+        sys.exit(1)
+
+    client = boto3.client("stepfunctions", region_name=region)
+
+    try:
+        response = client.start_execution(
+            stateMachineArn=state_machine,
+            input=json.dumps({"fetch_player_details": True}),
+        )
+        execution_arn = response["executionArn"]
+        click.echo("Pipeline started successfully!")
+        click.echo()
+        click.echo(f"Execution ARN: {execution_arn}")
+        click.echo()
+        click.echo("Check status with:")
+        click.echo(f"  aws stepfunctions describe-execution --execution-arn {execution_arn}")
+    except client.exceptions.StateMachineDoesNotExist:
+        click.echo(f"Error: State machine not found: {state_machine}", err=True)
+        sys.exit(1)
+    except Exception as e:
+        click.echo(f"Error starting pipeline: {e}", err=True)
+        sys.exit(1)
+
+
+def main():
+    """Entry point for CLI."""
+    cli(obj={})
+
+
+if __name__ == "__main__":
+    main()
