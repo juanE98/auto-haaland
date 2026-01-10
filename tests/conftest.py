@@ -45,6 +45,23 @@ def s3_resource(aws_credentials):
         yield resource
 
 
+# === Lambda Context Fixture ===
+
+class MockLambdaContext:
+    """Mock AWS Lambda context for testing."""
+
+    function_name = "test-function"
+    memory_limit_in_mb = 128
+    invoked_function_arn = "arn:aws:lambda:ap-southeast-2:123456789:function:test"
+    aws_request_id = "test-request-id"
+
+
+@pytest.fixture
+def lambda_context():
+    """Provide a mock Lambda context for handler tests."""
+    return MockLambdaContext()
+
+
 # === DynamoDB Fixtures ===
 
 @pytest.fixture

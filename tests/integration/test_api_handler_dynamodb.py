@@ -147,7 +147,7 @@ class TestGetPredictionsEndpoint:
     """Integration tests for GET /predictions endpoint."""
 
     @mock_aws
-    def test_get_predictions_by_gameweek(self, sample_predictions):
+    def test_get_predictions_by_gameweek(self, sample_predictions, lambda_context):
         """Test getting all predictions for a gameweek."""
         # Setup
         dynamodb = boto3.resource("dynamodb", region_name="ap-southeast-2")
@@ -195,7 +195,7 @@ class TestGetPredictionsEndpoint:
             "queryStringParameters": {"gameweek": "20"},
         }
 
-        response = handler(event, None)
+        response = handler(event, lambda_context)
         body = json.loads(response["body"])
 
         assert response["statusCode"] == 200
@@ -203,7 +203,7 @@ class TestGetPredictionsEndpoint:
         assert body["count"] == 5  # 5 predictions for GW20
 
     @mock_aws
-    def test_predictions_sorted_by_points_descending(self, sample_predictions):
+    def test_predictions_sorted_by_points_descending(self, sample_predictions, lambda_context):
         """Test predictions are sorted by predicted_points descending."""
         dynamodb = boto3.resource("dynamodb", region_name="ap-southeast-2")
         table = dynamodb.create_table(
@@ -249,7 +249,7 @@ class TestGetPredictionsEndpoint:
             "queryStringParameters": {"gameweek": "20"},
         }
 
-        response = handler(event, None)
+        response = handler(event, lambda_context)
         body = json.loads(response["body"])
 
         points = [p["predicted_points"] for p in body["predictions"]]
@@ -260,7 +260,7 @@ class TestGetPlayerPredictionEndpoint:
     """Integration tests for GET /predictions/{player_id} endpoint."""
 
     @mock_aws
-    def test_get_player_prediction_specific_gameweek(self, sample_predictions):
+    def test_get_player_prediction_specific_gameweek(self, sample_predictions, lambda_context):
         """Test getting prediction for specific player and gameweek."""
         dynamodb = boto3.resource("dynamodb", region_name="ap-southeast-2")
         table = dynamodb.create_table(
@@ -288,7 +288,7 @@ class TestGetPlayerPredictionEndpoint:
             "queryStringParameters": {"gameweek": "20"},
         }
 
-        response = handler(event, None)
+        response = handler(event, lambda_context)
         body = json.loads(response["body"])
 
         assert response["statusCode"] == 200
@@ -297,7 +297,7 @@ class TestGetPlayerPredictionEndpoint:
         assert body["predicted_points"] == 8.5
 
     @mock_aws
-    def test_get_player_all_gameweeks(self, sample_predictions):
+    def test_get_player_all_gameweeks(self, sample_predictions, lambda_context):
         """Test getting all predictions for a player."""
         dynamodb = boto3.resource("dynamodb", region_name="ap-southeast-2")
         table = dynamodb.create_table(
@@ -325,7 +325,7 @@ class TestGetPlayerPredictionEndpoint:
             "queryStringParameters": None,
         }
 
-        response = handler(event, None)
+        response = handler(event, lambda_context)
         body = json.loads(response["body"])
 
         assert response["statusCode"] == 200
@@ -337,7 +337,7 @@ class TestTopPredictionsEndpoint:
     """Integration tests for GET /top endpoint."""
 
     @mock_aws
-    def test_get_top_predictions(self, sample_predictions):
+    def test_get_top_predictions(self, sample_predictions, lambda_context):
         """Test getting top predictions for a gameweek."""
         dynamodb = boto3.resource("dynamodb", region_name="ap-southeast-2")
         table = dynamodb.create_table(
@@ -383,7 +383,7 @@ class TestTopPredictionsEndpoint:
             "queryStringParameters": {"gameweek": "20", "limit": "3"},
         }
 
-        response = handler(event, None)
+        response = handler(event, lambda_context)
         body = json.loads(response["body"])
 
         assert response["statusCode"] == 200
@@ -392,7 +392,7 @@ class TestTopPredictionsEndpoint:
         assert body["predictions"][0]["player_name"] == "Haaland"
 
     @mock_aws
-    def test_get_top_by_position(self, sample_predictions):
+    def test_get_top_by_position(self, sample_predictions, lambda_context):
         """Test getting top predictions filtered by position."""
         dynamodb = boto3.resource("dynamodb", region_name="ap-southeast-2")
         table = dynamodb.create_table(
@@ -451,7 +451,7 @@ class TestTopPredictionsEndpoint:
             "queryStringParameters": {"gameweek": "20", "position": "MID"},
         }
 
-        response = handler(event, None)
+        response = handler(event, lambda_context)
         body = json.loads(response["body"])
 
         assert response["statusCode"] == 200
@@ -464,7 +464,7 @@ class TestComparePlayersEndpoint:
     """Integration tests for GET /compare endpoint."""
 
     @mock_aws
-    def test_compare_multiple_players(self, sample_predictions):
+    def test_compare_multiple_players(self, sample_predictions, lambda_context):
         """Test comparing multiple players."""
         dynamodb = boto3.resource("dynamodb", region_name="ap-southeast-2")
         table = dynamodb.create_table(
@@ -494,7 +494,7 @@ class TestComparePlayersEndpoint:
             },
         }
 
-        response = handler(event, None)
+        response = handler(event, lambda_context)
         body = json.loads(response["body"])
 
         assert response["statusCode"] == 200
@@ -506,7 +506,7 @@ class TestComparePlayersEndpoint:
         assert body["predictions"][2]["player_name"] == "Saka"
 
     @mock_aws
-    def test_compare_with_missing_players(self, sample_predictions):
+    def test_compare_with_missing_players(self, sample_predictions, lambda_context):
         """Test comparing players when some are not found."""
         dynamodb = boto3.resource("dynamodb", region_name="ap-southeast-2")
         table = dynamodb.create_table(
@@ -536,7 +536,7 @@ class TestComparePlayersEndpoint:
             },
         }
 
-        response = handler(event, None)
+        response = handler(event, lambda_context)
         body = json.loads(response["body"])
 
         assert response["statusCode"] == 200
