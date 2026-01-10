@@ -1,0 +1,119 @@
+{
+  "Comment": "FPL Prediction Pipeline - Fetches data, processes features, and loads predictions",
+  "StartAt": "FetchData",
+  "States": {
+    "FetchData": {
+      "Type": "Task",
+      "Resource": "${DataFetcherFunctionArn}",
+      "Parameters": {
+        "fetch_player_details": true
+      },
+      "ResultPath": "$.fetchResult",
+      "Retry": [
+        {
+          "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException"],
+          "IntervalSeconds": 60,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "NotifyFailure"
+        }
+      ],
+      "Next": "ProcessFeatures"
+    },
+    "ProcessFeatures": {
+      "Type": "Task",
+      "Resource": "${FeatureProcessorFunctionArn}",
+      "Parameters": {
+        "gameweek.$": "$.fetchResult.gameweek",
+        "season.$": "$.fetchResult.season",
+        "mode": "prediction"
+      },
+      "ResultPath": "$.featureResult",
+      "Retry": [
+        {
+          "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException"],
+          "IntervalSeconds": 30,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "NotifyFailure"
+        }
+      ],
+      "Next": "TrainingPlaceholder"
+    },
+    "TrainingPlaceholder": {
+      "Type": "Pass",
+      "Comment": "Placeholder for SageMaker training - to be implemented",
+      "Parameters": {
+        "predictions_key.$": "States.Format('predictions/season_{}/gw{}_predictions.parquet', $.featureResult.season, $.featureResult.gameweek)",
+        "gameweek.$": "$.featureResult.gameweek",
+        "season.$": "$.featureResult.season"
+      },
+      "ResultPath": "$.trainingResult",
+      "Next": "LoadPredictions"
+    },
+    "LoadPredictions": {
+      "Type": "Task",
+      "Resource": "${PredictionLoaderFunctionArn}",
+      "Parameters": {
+        "gameweek.$": "$.trainingResult.gameweek",
+        "season.$": "$.trainingResult.season",
+        "predictions_key.$": "$.trainingResult.predictions_key",
+        "replace_existing": true
+      },
+      "ResultPath": "$.loadResult",
+      "Retry": [
+        {
+          "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException"],
+          "IntervalSeconds": 30,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "NotifyFailure"
+        }
+      ],
+      "Next": "NotifySuccess"
+    },
+    "NotifySuccess": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "${AlertTopicArn}",
+        "Subject": "FPL Pipeline Completed Successfully",
+        "Message.$": "States.Format('Pipeline completed for gameweek {}. Predictions loaded to DynamoDB.', $.loadResult.gameweek)"
+      },
+      "End": true
+    },
+    "NotifyFailure": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "${AlertTopicArn}",
+        "Subject": "FPL Pipeline FAILED",
+        "Message.$": "States.Format('Pipeline failed. Error: {}', States.JsonToString($.error))"
+      },
+      "Next": "FailPipeline"
+    },
+    "FailPipeline": {
+      "Type": "Fail",
+      "Error": "PipelineExecutionFailed",
+      "Cause": "One or more steps in the pipeline failed"
+    }
+  }
+}

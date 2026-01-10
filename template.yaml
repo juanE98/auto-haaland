@@ -1,0 +1,220 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Auto-Haaland FPL Prediction System
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - prod
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 300
+
+Resources:
+  # S3 Bucket
+  FPLDataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "fpl-ml-data-${Environment}"
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  # DynamoDB Table with GSIs
+  FPLPredictionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "fpl-predictions-${Environment}"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: player_id
+          AttributeType: N
+        - AttributeName: gameweek
+          AttributeType: N
+        - AttributeName: predicted_points
+          AttributeType: N
+        - AttributeName: position
+          AttributeType: S
+      KeySchema:
+        - AttributeName: player_id
+          KeyType: HASH
+        - AttributeName: gameweek
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: gameweek-points-index
+          KeySchema:
+            - AttributeName: gameweek
+              KeyType: HASH
+            - AttributeName: predicted_points
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: position-points-index
+          KeySchema:
+            - AttributeName: position
+              KeyType: HASH
+            - AttributeName: predicted_points
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  # Lambda Functions
+  DataFetcherFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "fpl-data-fetcher-${Environment}"
+      CodeUri: lambdas/
+      Handler: data_fetcher.handler.handler
+      Timeout: 900
+      MemorySize: 512
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref FPLDataBucket
+      Policies:
+        - S3CrudPolicy:
+            BucketName: !Ref FPLDataBucket
+
+  FeatureProcessorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "fpl-feature-processor-${Environment}"
+      CodeUri: lambdas/
+      Handler: feature_processor.handler.handler
+      MemorySize: 1024
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref FPLDataBucket
+      Policies:
+        - S3CrudPolicy:
+            BucketName: !Ref FPLDataBucket
+
+  PredictionLoaderFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "fpl-prediction-loader-${Environment}"
+      CodeUri: lambdas/
+      Handler: prediction_loader.handler.handler
+      MemorySize: 512
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref FPLDataBucket
+          TABLE_NAME: !Ref FPLPredictionsTable
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref FPLDataBucket
+        - DynamoDBCrudPolicy:
+            TableName: !Ref FPLPredictionsTable
+
+  ApiHandlerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "fpl-api-${Environment}"
+      CodeUri: lambdas/
+      Handler: api_handler.handler.handler
+      Timeout: 30
+      MemorySize: 256
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref FPLPredictionsTable
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref FPLPredictionsTable
+      Events:
+        GetPredictions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref FPLApi
+            Path: /predictions
+            Method: GET
+        GetPlayerPrediction:
+          Type: Api
+          Properties:
+            RestApiId: !Ref FPLApi
+            Path: /predictions/{player_id}
+            Method: GET
+        GetTop:
+          Type: Api
+          Properties:
+            RestApiId: !Ref FPLApi
+            Path: /top
+            Method: GET
+        Compare:
+          Type: Api
+          Properties:
+            RestApiId: !Ref FPLApi
+            Path: /compare
+            Method: GET
+
+  # Step Functions State Machine
+  FPLPipelineStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name: !Sub "fpl-pipeline-${Environment}"
+      DefinitionUri: statemachine/pipeline.asl.json
+      DefinitionSubstitutions:
+        DataFetcherFunctionArn: !GetAtt DataFetcherFunction.Arn
+        FeatureProcessorFunctionArn: !GetAtt FeatureProcessorFunction.Arn
+        PredictionLoaderFunctionArn: !GetAtt PredictionLoaderFunction.Arn
+        AlertTopicArn: !Ref AlertTopic
+      Policies:
+        - LambdaInvokePolicy:
+            FunctionName: !Ref DataFetcherFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref FeatureProcessorFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref PredictionLoaderFunction
+        - SNSPublishMessagePolicy:
+            TopicName: !GetAtt AlertTopic.TopicName
+      Events:
+        WeeklyTrigger:
+          Type: Schedule
+          Properties:
+            Description: Run FPL prediction pipeline weekly
+            Schedule: "cron(0 6 ? * SAT *)"
+            Enabled: true
+
+  # SNS Alerts
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "fpl-alerts-${Environment}"
+
+  # API Gateway
+  FPLApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub "fpl-api-${Environment}"
+      StageName: !Ref Environment
+      Cors:
+        AllowOrigin: "'*'"
+        AllowHeaders: "'Content-Type'"
+        AllowMethods: "'GET,OPTIONS'"
+
+Outputs:
+  ApiEndpoint:
+    Description: API Gateway endpoint URL
+    Value: !Sub "https://${FPLApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/"
+
+  StateMachineArn:
+    Description: Step Functions State Machine ARN
+    Value: !Ref FPLPipelineStateMachine
+
+  DataBucketName:
+    Description: S3 Bucket for FPL data
+    Value: !Ref FPLDataBucket
+
+  PredictionsTableName:
+    Description: DynamoDB table for predictions
+    Value: !Ref FPLPredictionsTable
+
+  AlertTopicArn:
+    Description: SNS Topic ARN for alerts
+    Value: !Ref AlertTopic
