@@ -96,6 +96,22 @@ Resources:
         - S3CrudPolicy:
             BucketName: !Ref FPLDataBucket
 
+  InferenceFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "fpl-inference-${Environment}"
+      CodeUri: lambdas/
+      Handler: inference.handler.handler
+      Timeout: 300
+      MemorySize: 1024
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref FPLDataBucket
+          MODEL_KEY: models/model.xgb
+      Policies:
+        - S3CrudPolicy:
+            BucketName: !Ref FPLDataBucket
+
   PredictionLoaderFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -162,6 +178,7 @@ Resources:
       DefinitionSubstitutions:
         DataFetcherFunctionArn: !GetAtt DataFetcherFunction.Arn
         FeatureProcessorFunctionArn: !GetAtt FeatureProcessorFunction.Arn
+        InferenceFunctionArn: !GetAtt InferenceFunction.Arn
         PredictionLoaderFunctionArn: !GetAtt PredictionLoaderFunction.Arn
         AlertTopicArn: !Ref AlertTopic
       Policies:
@@ -169,6 +186,8 @@ Resources:
             FunctionName: !Ref DataFetcherFunction
         - LambdaInvokePolicy:
             FunctionName: !Ref FeatureProcessorFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref InferenceFunction
         - LambdaInvokePolicy:
             FunctionName: !Ref PredictionLoaderFunction
         - SNSPublishMessagePolicy:

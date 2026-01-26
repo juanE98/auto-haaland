@@ -1,4 +1,4 @@
-.PHONY: setup install test test-unit test-integration local-up local-down local-api local-logs clean help
+.PHONY: setup install test test-unit test-integration local-up local-down local-api local-logs clean help import-historical backfill train-and-upload
 
 # Default target
 help:
@@ -19,8 +19,11 @@ help:
 	@echo "  make test-unit      - Run unit tests only"
 	@echo "  make test-integration - Run integration tests (requires LocalStack)"
 	@echo ""
-	@echo "Training:"
-	@echo "  make train-local    - Train XGBoost model locally"
+	@echo "Data & Training:"
+	@echo "  make import-historical - Import historical data from GitHub"
+	@echo "  make backfill          - Backfill current season from FPL API"
+	@echo "  make train-local       - Train XGBoost model locally"
+	@echo "  make train-and-upload  - Train locally and upload model to S3"
 	@echo ""
 	@echo "AWS Deployment:"
 	@echo "  make build          - Build SAM application"
@@ -68,9 +71,21 @@ local-api:
 	@echo "Starting local API Gateway..."
 	sam local start-api --host 0.0.0.0 --port 3000
 
+import-historical:
+	@echo "Importing historical data..."
+	venv/bin/python scripts/import_historical.py --seasons 2021-22,2022-23,2023-24 --output-dir data/historical/
+
+backfill:
+	@echo "Backfilling current season data..."
+	venv/bin/python scripts/backfill_current_season.py --output-dir data/current/
+
 train-local:
 	@echo "Training model locally..."
-	venv/bin/python sagemaker/train_local.py
+	venv/bin/python sagemaker/train_local.py --data-dir data/ --output-path models/
+
+train-and-upload:
+	@echo "Training model and uploading to S3..."
+	venv/bin/python sagemaker/train_local.py --data-dir data/ --output-path models/ --upload-s3 --bucket fpl-ml-data-dev
 
 build:
 	@echo "Building SAM application..."

@@ -1,5 +1,5 @@
 {
-  "Comment": "FPL Prediction Pipeline - Fetches data, processes features, and loads predictions",
+  "Comment": "FPL Prediction Pipeline - Fetches data, processes features, runs inference, and loads predictions",
   "StartAt": "FetchData",
   "States": {
     "FetchData": {
@@ -50,26 +50,41 @@
           "Next": "NotifyFailure"
         }
       ],
-      "Next": "TrainingPlaceholder"
+      "Next": "RunInference"
     },
-    "TrainingPlaceholder": {
-      "Type": "Pass",
-      "Comment": "Placeholder for SageMaker training - to be implemented",
+    "RunInference": {
+      "Type": "Task",
+      "Resource": "${InferenceFunctionArn}",
       "Parameters": {
-        "predictions_key.$": "States.Format('predictions/season_{}/gw{}_predictions.parquet', $.featureResult.season, $.featureResult.gameweek)",
         "gameweek.$": "$.featureResult.gameweek",
-        "season.$": "$.featureResult.season"
+        "season.$": "$.featureResult.season",
+        "features_file.$": "$.featureResult.features_file"
       },
-      "ResultPath": "$.trainingResult",
+      "ResultPath": "$.inferenceResult",
+      "Retry": [
+        {
+          "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException"],
+          "IntervalSeconds": 30,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "NotifyFailure"
+        }
+      ],
       "Next": "LoadPredictions"
     },
     "LoadPredictions": {
       "Type": "Task",
       "Resource": "${PredictionLoaderFunctionArn}",
       "Parameters": {
-        "gameweek.$": "$.trainingResult.gameweek",
-        "season.$": "$.trainingResult.season",
-        "predictions_key.$": "$.trainingResult.predictions_key",
+        "gameweek.$": "$.inferenceResult.gameweek",
+        "season.$": "$.inferenceResult.season",
+        "predictions_key.$": "$.inferenceResult.predictions_key",
         "replace_existing": true
       },
       "ResultPath": "$.loadResult",

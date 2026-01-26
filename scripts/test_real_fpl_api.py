@@ -8,8 +8,8 @@ Run this to verify the API wrapper is working correctly.
 Usage:
     python scripts/test_real_fpl_api.py
 """
-import sys
 import json
+import sys
 from pathlib import Path
 
 # Add parent directory to path

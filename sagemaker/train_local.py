@@ -15,10 +15,11 @@ import os
 from pathlib import Path
 from typing import Optional
 
+import boto3
 import pandas as pd
 import xgboost as xgb
-from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.model_selection import train_test_split
 
 logging.basicConfig(
     level=logging.INFO,
@@ -80,11 +81,9 @@ def load_training_data(
         if not dir_path.exists():
             raise FileNotFoundError(f"Data directory not found: {data_dir}")
 
-        parquet_files = list(dir_path.glob("*_features_training.parquet"))
+        parquet_files = list(dir_path.rglob("*_features_training.parquet"))
         if not parquet_files:
-            raise FileNotFoundError(
-                f"No training parquet files found in {data_dir}"
-            )
+            raise FileNotFoundError(f"No training parquet files found in {data_dir}")
 
         logger.info(f"Loading {len(parquet_files)} parquet files from {data_dir}")
         dfs = [pd.read_parquet(f) for f in parquet_files]
@@ -259,6 +258,36 @@ def load_model(model_path: str) -> xgb.XGBRegressor:
     return model
 
 
+def upload_model_to_s3(
+    model_path: str,
+    bucket: str,
+    model_key: str = "models/model.xgb",
+) -> str:
+    """
+    Upload a trained model file to S3.
+
+    Args:
+        model_path: Local path to the model file.
+        bucket: S3 bucket name.
+        model_key: S3 key for the model (default: models/model.xgb).
+
+    Returns:
+        S3 URI where the model was uploaded.
+    """
+    s3_client = boto3.client(
+        "s3",
+        region_name=os.getenv("AWS_DEFAULT_REGION", "ap-southeast-2"),
+        endpoint_url=os.getenv("AWS_ENDPOINT_URL"),
+    )
+
+    logger.info(f"Uploading {model_path} to s3://{bucket}/{model_key}")
+    s3_client.upload_file(model_path, bucket, model_key)
+
+    s3_uri = f"s3://{bucket}/{model_key}"
+    logger.info(f"Model uploaded to {s3_uri}")
+    return s3_uri
+
+
 def main():
     """Main entry point for local training."""
     parser = argparse.ArgumentParser(
@@ -304,6 +333,23 @@ def main():
         default=0.1,
         help="Learning rate (default: 0.1)",
     )
+    parser.add_argument(
+        "--upload-s3",
+        action="store_true",
+        help="Upload trained model to S3 after training",
+    )
+    parser.add_argument(
+        "--bucket",
+        type=str,
+        default="fpl-ml-data-dev",
+        help="S3 bucket for model upload (default: fpl-ml-data-dev)",
+    )
+    parser.add_argument(
+        "--model-key",
+        type=str,
+        default="models/model.xgb",
+        help="S3 key for model upload (default: models/model.xgb)",
+    )
 
     args = parser.parse_args()
 
@@ -332,6 +378,11 @@ def main():
 
     # Save model
     model_path = save_model(model, args.output_path)
+
+    # Upload to S3 if requested
+    if args.upload_s3:
+        s3_uri = upload_model_to_s3(model_path, args.bucket, args.model_key)
+        logger.info(f"Model uploaded to: {s3_uri}")
 
     logger.info("Training complete!")
     logger.info(f"Model saved to: {model_path}")

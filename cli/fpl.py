@@ -1,6 +1,7 @@
-"""FPL Prediction CLI - Query predictions and trigger pipeline."""
+"""FPL Prediction CLI - Query predictions, trigger pipeline, and manage data."""
 
 import json
+import subprocess
 import sys
 
 import boto3
@@ -328,6 +329,132 @@ def run(state_machine: str | None, region: str):
     except Exception as e:
         click.echo(f"Error starting pipeline: {e}", err=True)
         sys.exit(1)
+
+
+@cli.command()
+@click.option(
+    "--data-dir",
+    type=str,
+    default="data/",
+    help="Directory containing training Parquet files (default: data/)",
+)
+@click.option(
+    "--output-path",
+    type=str,
+    default="models/",
+    help="Output path for the trained model (default: models/)",
+)
+@click.option(
+    "--upload-s3",
+    is_flag=True,
+    help="Upload trained model to S3",
+)
+@click.option(
+    "--bucket",
+    type=str,
+    default="fpl-ml-data-dev",
+    help="S3 bucket for model upload (default: fpl-ml-data-dev)",
+)
+def train(data_dir: str, output_path: str, upload_s3: bool, bucket: str):
+    """Train XGBoost model locally and optionally upload to S3."""
+    cmd = [
+        sys.executable,
+        "sagemaker/train_local.py",
+        "--data-dir",
+        data_dir,
+        "--output-path",
+        output_path,
+    ]
+    if upload_s3:
+        cmd.extend(["--upload-s3", "--bucket", bucket])
+
+    click.echo(f"Training model with data from {data_dir}...")
+    result = subprocess.run(cmd, capture_output=False)
+    sys.exit(result.returncode)
+
+
+@cli.command("import-historical")
+@click.option(
+    "--seasons",
+    type=str,
+    required=True,
+    help="Comma-separated seasons (e.g. 2021-22,2022-23,2023-24)",
+)
+@click.option(
+    "--output-dir",
+    type=str,
+    default="data/historical/",
+    help="Output directory (default: data/historical/)",
+)
+@click.option(
+    "--upload-s3",
+    is_flag=True,
+    help="Upload output files to S3",
+)
+@click.option(
+    "--bucket",
+    type=str,
+    default="fpl-ml-data-dev",
+    help="S3 bucket name (default: fpl-ml-data-dev)",
+)
+def import_historical(seasons: str, output_dir: str, upload_s3: bool, bucket: str):
+    """Import historical FPL data from vaastav/Fantasy-Premier-League."""
+    cmd = [
+        sys.executable,
+        "scripts/import_historical.py",
+        "--seasons",
+        seasons,
+        "--output-dir",
+        output_dir,
+    ]
+    if upload_s3:
+        cmd.extend(["--upload-s3", "--bucket", bucket])
+
+    click.echo(f"Importing historical data for seasons: {seasons}...")
+    result = subprocess.run(cmd, capture_output=False)
+    sys.exit(result.returncode)
+
+
+@cli.command()
+@click.option(
+    "--output-dir",
+    type=str,
+    default="data/current/",
+    help="Output directory (default: data/current/)",
+)
+@click.option(
+    "--start-gw",
+    type=int,
+    default=4,
+    help="First gameweek to generate training data for (default: 4)",
+)
+@click.option(
+    "--upload-s3",
+    is_flag=True,
+    help="Upload output files to S3",
+)
+@click.option(
+    "--bucket",
+    type=str,
+    default="fpl-ml-data-dev",
+    help="S3 bucket name (default: fpl-ml-data-dev)",
+)
+def backfill(output_dir: str, start_gw: int, upload_s3: bool, bucket: str):
+    """Backfill current season data using the FPL API."""
+    cmd = [
+        sys.executable,
+        "scripts/backfill_current_season.py",
+        "--output-dir",
+        output_dir,
+        "--start-gw",
+        str(start_gw),
+    ]
+    if upload_s3:
+        cmd.extend(["--upload-s3", "--bucket", bucket])
+
+    click.echo(f"Backfilling current season data from GW{start_gw}...")
+    result = subprocess.run(cmd, capture_output=False)
+    sys.exit(result.returncode)
 
 
 def main():
