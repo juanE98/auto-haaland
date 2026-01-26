@@ -1,5 +1,8 @@
 # Auto-Haaland: FPL ML Prediction System
 
+![CI](https://github.com/juanE98/auto-haaland/actions/workflows/ci.yml/badge.svg)
+![Deploy](https://github.com/juanE98/auto-haaland/actions/workflows/deploy.yml/badge.svg)
+
 ![Python](https://img.shields.io/badge/python-3.12-%233776AB.svg?style=for-the-badge&logo=python&logoColor=white)
 ![AWS Lambda](https://img.shields.io/badge/aws--lambda-%23FF9900.svg?style=for-the-badge&logo=aws-lambda&logoColor=white)
 ![AWS S3](https://img.shields.io/badge/aws--s3-%23569A31.svg?style=for-the-badge&logo=amazon-s3&logoColor=white)
