@@ -340,7 +340,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             "error": f"Invalid mode: {mode}. Must be 'historical' or 'prediction'",
         }
 
-    # Initialize S3 client
+    # Initialise S3 client
     s3_client = get_s3_client(endpoint_url=AWS_ENDPOINT_URL)
 
     try:

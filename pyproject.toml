@@ -1,5 +1,6 @@
 [tool.isort]
 profile = "black"
+known_first_party = ["common", "cli", "lambdas", "sagemaker"]
 
 [tool.black]
 line-length = 88

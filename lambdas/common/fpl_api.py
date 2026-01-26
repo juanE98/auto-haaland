@@ -35,7 +35,7 @@ class FPLApiClient:
         self, timeout: int = 30, max_retries: int = 3, base_delay: float = 1.0
     ):
         """
-        Initialize FPL API client.
+        Initialise FPL API client.
 
         Args:
             timeout: Request timeout in seconds

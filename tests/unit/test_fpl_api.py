@@ -13,8 +13,8 @@ from lambdas.common.fpl_api import FPLApiClient, FPLApiError
 class TestFPLApiClient:
     """Tests for FPLApiClient."""
 
-    def test_initialization(self):
-        """Test client initialization with custom parameters."""
+    def test_initialisation(self):
+        """Test client initialisation with custom parameters."""
         client = FPLApiClient(timeout=60, max_retries=5, base_delay=2.0)
 
         assert client.timeout == 60

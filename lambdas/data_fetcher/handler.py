@@ -71,7 +71,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     gameweek = event.get("gameweek")
     fetch_player_details = event.get("fetch_player_details", False)
 
-    # Initialize clients
+    # Initialise clients
     s3_client = get_s3_client(endpoint_url=AWS_ENDPOINT_URL)
     files_saved = []
 

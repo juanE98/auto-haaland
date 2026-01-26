@@ -259,7 +259,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         )
 
     try:
-        # Initialize clients
+        # Initialise clients
         s3_client = get_s3_client(endpoint_url=AWS_ENDPOINT_URL)
         dynamodb = get_dynamodb_resource(endpoint_url=AWS_ENDPOINT_URL)
         table = dynamodb.Table(TABLE_NAME)
