@@ -1,4 +1,4 @@
-.PHONY: setup install test test-unit test-integration local-up local-down local-api local-logs clean help import-historical backfill train-and-upload
+.PHONY: setup install test test-unit test-integration local-up local-down local-api local-logs clean help import-historical backfill train-and-upload top player compare predictions run-pipeline
 
 # Default target
 help:
@@ -24,6 +24,13 @@ help:
 	@echo "  make backfill          - Backfill current season from FPL API"
 	@echo "  make train-local       - Train XGBoost model locally"
 	@echo "  make train-and-upload  - Train locally and upload model to S3"
+	@echo ""
+	@echo "CLI Queries (GW is required):"
+	@echo "  make top GW=22                 - Top predicted scorers for gameweek"
+	@echo "  make player ID=328 GW=22       - Predictions for a specific player"
+	@echo "  make compare IDS=328,350 GW=22 - Compare players for a gameweek"
+	@echo "  make predictions GW=22         - All predictions for a gameweek"
+	@echo "  make run-pipeline              - Trigger the Step Functions pipeline"
 	@echo ""
 	@echo "AWS Deployment:"
 	@echo "  make build          - Build SAM application"
@@ -86,6 +93,41 @@ train-local:
 train-and-upload:
 	@echo "Training model and uploading to S3..."
 	venv/bin/python sagemaker/train_local.py --data-dir data/ --output-path models/ --upload-s3 --bucket fpl-ml-data-dev
+
+API_ENDPOINT ?= $(shell aws ssm get-parameter --name /auto-haaland/dev/api-endpoint --query Parameter.Value --output text --region ap-southeast-2 2>/dev/null)
+STATE_MACHINE_ARN ?= $(shell aws ssm get-parameter --name /auto-haaland/dev/state-machine-arn --query Parameter.Value --output text --region ap-southeast-2 2>/dev/null)
+top:
+ifndef GW
+	$(error GW is required. Usage: make top GW=22)
+endif
+	venv/bin/python -m cli.fpl --endpoint $(API_ENDPOINT) top -g $(GW)
+
+player:
+ifndef ID
+	$(error ID is required. Usage: make player ID=328 GW=22)
+endif
+ifndef GW
+	$(error GW is required. Usage: make player ID=328 GW=22)
+endif
+	venv/bin/python -m cli.fpl --endpoint $(API_ENDPOINT) player $(ID) -g $(GW)
+
+compare:
+ifndef IDS
+	$(error IDS is required. Usage: make compare IDS=328,350 GW=22)
+endif
+ifndef GW
+	$(error GW is required. Usage: make compare IDS=328,350 GW=22)
+endif
+	venv/bin/python -m cli.fpl --endpoint $(API_ENDPOINT) compare $(IDS) -g $(GW)
+
+predictions:
+ifndef GW
+	$(error GW is required. Usage: make predictions GW=22)
+endif
+	venv/bin/python -m cli.fpl --endpoint $(API_ENDPOINT) predictions -g $(GW)
+
+run-pipeline:
+	venv/bin/python -m cli.fpl run --state-machine $(STATE_MACHINE_ARN)
 
 build:
 	@echo "Building SAM application..."
