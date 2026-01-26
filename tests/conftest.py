@@ -3,10 +3,10 @@ Shared pytest fixtures for Auto-Haaland FPL ML System tests.
 """
 
 import os
-import pytest
-import boto3
-from moto import mock_aws
 
+import boto3
+import pytest
+from moto import mock_aws
 
 # === Environment Setup ===
 

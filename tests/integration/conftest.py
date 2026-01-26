@@ -6,8 +6,9 @@ vs when it's not (moto mocks).
 """
 
 import os
-import pytest
+
 import boto3
+import pytest
 from botocore.exceptions import ClientError
 
 

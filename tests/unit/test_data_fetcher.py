@@ -3,8 +3,9 @@ Unit tests for data_fetcher Lambda handler.
 """
 
 import json
+from unittest.mock import MagicMock, Mock, call, patch
+
 import pytest
-from unittest.mock import Mock, patch, MagicMock, call
 
 from lambdas.data_fetcher.handler import handler, save_to_s3
 

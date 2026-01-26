@@ -2,9 +2,10 @@
 Unit tests for FPL API client.
 """
 
-import pytest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import MagicMock, Mock, patch
+
 import httpx
+import pytest
 
 from lambdas.common.fpl_api import FPLApiClient, FPLApiError
 

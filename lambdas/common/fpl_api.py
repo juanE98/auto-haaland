@@ -5,13 +5,12 @@ The official FPL API is free and requires no authentication.
 Rate limits are generous, but we implement exponential backoff to be respectful.
 """
 
-import time
 import logging
-from typing import Dict, Any, Optional
+import time
 from datetime import datetime
+from typing import Any, Dict, Optional
 
 import httpx
-
 
 logger = logging.getLogger(__name__)
 

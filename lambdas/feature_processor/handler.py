@@ -17,7 +17,6 @@ from botocore.exceptions import ClientError
 
 from lambdas.common.aws_clients import get_s3_client
 
-
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)

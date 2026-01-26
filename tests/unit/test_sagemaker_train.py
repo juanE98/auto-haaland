@@ -5,23 +5,23 @@ Unit tests for SageMaker training module.
 import json
 import tempfile
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
 import xgboost as xgb
 
 from sagemaker.train_local import (
+    DEFAULT_HYPERPARAMS,
     FEATURE_COLS,
     TARGET_COL,
-    DEFAULT_HYPERPARAMS,
-    load_training_data,
-    validate_features,
-    train_model,
     evaluate_model,
     get_feature_importance,
-    save_model,
     load_model,
+    load_training_data,
+    save_model,
+    train_model,
+    validate_features,
 )
 
 

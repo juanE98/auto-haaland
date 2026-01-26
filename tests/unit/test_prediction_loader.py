@@ -2,20 +2,20 @@
 Unit tests for prediction_loader Lambda handler.
 """
 
-from decimal import Decimal
-from unittest.mock import Mock, patch, MagicMock
 import io
+from decimal import Decimal
+from unittest.mock import MagicMock, Mock, patch
 
 import pandas as pd
 import pytest
 
 from lambdas.prediction_loader.handler import (
     POSITION_MAP,
+    batch_write_predictions,
+    convert_to_dynamodb_item,
+    handler,
     load_predictions_from_s3,
     validate_predictions,
-    convert_to_dynamodb_item,
-    batch_write_predictions,
-    handler,
 )
 
 

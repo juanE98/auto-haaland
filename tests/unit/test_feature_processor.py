@@ -3,16 +3,17 @@ Unit tests for feature_processor Lambda handler.
 """
 
 import json
+from unittest.mock import MagicMock, Mock, patch
+
 import pytest
-from unittest.mock import Mock, patch, MagicMock
 
 from lambdas.feature_processor.handler import (
-    handler,
-    calculate_rolling_average,
     calculate_minutes_pct,
-    get_team_strength,
-    get_opponent_info,
+    calculate_rolling_average,
     engineer_features,
+    get_opponent_info,
+    get_team_strength,
+    handler,
 )
 
 

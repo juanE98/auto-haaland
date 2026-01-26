@@ -7,18 +7,18 @@ Mark these tests with @pytest.mark.integration
 
 import io
 import json
-import pytest
 from unittest.mock import patch
 
 import pandas as pd
+import pytest
 
 from lambdas.feature_processor.handler import (
+    engineer_features,
     handler,
     load_bootstrap_from_s3,
     load_fixtures_from_s3,
     load_player_histories_from_s3,
     save_features_to_s3,
-    engineer_features,
 )
 
 

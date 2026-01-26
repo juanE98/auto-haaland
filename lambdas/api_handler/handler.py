@@ -27,7 +27,6 @@ from botocore.exceptions import ClientError
 
 from lambdas.common.aws_clients import get_dynamodb_resource
 
-
 logger = Logger(service="fpl-api")
 cors_config = CORSConfig(
     allow_origin="*",

@@ -10,8 +10,8 @@ import pytest
 from boto3.dynamodb.conditions import Key
 
 from lambdas.prediction_loader.handler import (
-    convert_to_dynamodb_item,
     batch_write_predictions,
+    convert_to_dynamodb_item,
     delete_gameweek_predictions,
     handler,
 )

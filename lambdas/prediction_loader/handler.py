@@ -16,8 +16,7 @@ import boto3
 import pandas as pd
 from botocore.exceptions import ClientError
 
-from lambdas.common.aws_clients import get_s3_client, get_dynamodb_resource
-
+from lambdas.common.aws_clients import get_dynamodb_resource, get_s3_client
 
 # Configure logging
 logger = logging.getLogger()

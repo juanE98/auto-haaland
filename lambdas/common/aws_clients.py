@@ -6,13 +6,12 @@ Provides boto3 clients with proper configuration for both:
 - Production (Real AWS)
 """
 
-import os
 import logging
+import os
 from typing import Optional
 
 import boto3
 from botocore.config import Config
-
 
 logger = logging.getLogger(__name__)
 

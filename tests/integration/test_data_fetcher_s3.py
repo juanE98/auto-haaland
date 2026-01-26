@@ -6,8 +6,9 @@ Mark these tests with @pytest.mark.integration
 """
 
 import json
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 from lambdas.data_fetcher.handler import handler, save_to_s3
 

@@ -9,11 +9,10 @@ import json
 import logging
 import os
 from datetime import datetime
-from typing import Dict, Any
+from typing import Any, Dict
 
-from lambdas.common.fpl_api import FPLApiClient, FPLApiError
 from lambdas.common.aws_clients import get_s3_client
-
+from lambdas.common.fpl_api import FPLApiClient, FPLApiError
 
 # Configure logging
 logger = logging.getLogger()

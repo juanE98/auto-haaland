@@ -8,19 +8,19 @@ Otherwise, they use moto mocks.
 import io
 import json
 import os
-import pytest
+
 import boto3
 import pandas as pd
+import pytest
 
 from sagemaker.train_local import (
     FEATURE_COLS,
     TARGET_COL,
-    train_model,
     evaluate_model,
-    save_model,
     load_model,
+    save_model,
+    train_model,
 )
-
 
 # Skip moto-based tests when running against LocalStack
 use_localstack = os.environ.get("AWS_ENDPOINT_URL") is not None

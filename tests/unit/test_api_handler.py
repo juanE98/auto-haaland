@@ -4,16 +4,11 @@ Unit tests for api_handler Lambda using AWS Lambda Powertools.
 
 import json
 from decimal import Decimal
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from lambdas.api_handler.handler import (
-    app,
-    handler,
-    decimal_to_float,
-    VALID_POSITIONS,
-)
+from lambdas.api_handler.handler import VALID_POSITIONS, app, decimal_to_float, handler
 
 
 class MockLambdaContext:
