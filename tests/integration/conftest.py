@@ -148,3 +148,37 @@ def clean_s3_bucket(localstack_s3_client, s3_bucket):
     #         localstack_s3_client.delete_objects(
     #             Bucket=s3_bucket, Delete={"Objects": objects}
     #         )
+
+
+@pytest.fixture
+def clean_dynamodb_table(dynamodb_predictions_table):
+    """
+    Provide a clean DynamoDB table by deleting all items before each test.
+    Use this fixture when tests need isolation.
+    """
+    # Clean up before test - scan and delete all items
+    response = dynamodb_predictions_table.scan()
+    with dynamodb_predictions_table.batch_writer() as writer:
+        for item in response.get("Items", []):
+            writer.delete_item(
+                Key={
+                    "player_id": item["player_id"],
+                    "gameweek": item["gameweek"],
+                }
+            )
+
+    # Handle pagination
+    while "LastEvaluatedKey" in response:
+        response = dynamodb_predictions_table.scan(
+            ExclusiveStartKey=response["LastEvaluatedKey"]
+        )
+        with dynamodb_predictions_table.batch_writer() as writer:
+            for item in response.get("Items", []):
+                writer.delete_item(
+                    Key={
+                        "player_id": item["player_id"],
+                        "gameweek": item["gameweek"],
+                    }
+                )
+
+    yield dynamodb_predictions_table

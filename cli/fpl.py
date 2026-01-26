@@ -1,7 +1,6 @@
 """FPL Prediction CLI - Query predictions and trigger pipeline."""
 
 import json
-import os
 import sys
 
 import boto3

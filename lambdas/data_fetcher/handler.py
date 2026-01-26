@@ -128,7 +128,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     player_id = player["id"]
 
                     if i % 10 == 0:
-                        logger.info(f"Processing player {i+1}/{max_players}")
+                        logger.info(f"Processing player {i + 1}/{max_players}")
 
                     try:
                         player_summary = fpl.get_player_summary(player_id)

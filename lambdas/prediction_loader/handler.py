@@ -138,7 +138,7 @@ def batch_write_predictions(
     total_batches = 0
 
     for i in range(0, len(predictions), batch_size):
-        batch = predictions[i : i + batch_size]
+        batch = predictions[i:i + batch_size]
 
         with table.batch_writer() as writer:
             for item in batch:
