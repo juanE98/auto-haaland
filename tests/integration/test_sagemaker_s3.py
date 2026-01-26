@@ -1,13 +1,16 @@
 """
 Integration tests for SageMaker training with S3.
+
+When AWS_ENDPOINT_URL is set, these tests run against LocalStack.
+Otherwise, they use moto mocks.
 """
 
 import io
 import json
+import os
 import pytest
 import boto3
 import pandas as pd
-from moto import mock_aws
 
 from sagemaker.train_local import (
     FEATURE_COLS,
@@ -17,6 +20,10 @@ from sagemaker.train_local import (
     save_model,
     load_model,
 )
+
+
+# Skip moto-based tests when running against LocalStack
+use_localstack = os.environ.get("AWS_ENDPOINT_URL") is not None
 
 
 @pytest.fixture
@@ -41,18 +48,16 @@ def training_features_dataframe():
     })
 
 
+@pytest.mark.integration
 class TestS3DataLoading:
     """Tests for loading training data from S3."""
 
-    @mock_aws
-    def test_load_parquet_from_s3(self, training_features_dataframe):
+    def test_load_parquet_from_s3(
+        self, training_features_dataframe, localstack_s3_client, clean_s3_bucket
+    ):
         """Test loading Parquet file from S3."""
-        # Setup S3
-        s3 = boto3.client("s3", region_name="ap-southeast-2")
-        s3.create_bucket(
-            Bucket="fpl-ml-data",
-            CreateBucketConfiguration={"LocationConstraint": "ap-southeast-2"}
-        )
+        s3 = localstack_s3_client
+        bucket = clean_s3_bucket
 
         # Upload Parquet
         buffer = io.BytesIO()
@@ -60,15 +65,15 @@ class TestS3DataLoading:
         buffer.seek(0)
 
         s3.put_object(
-            Bucket="fpl-ml-data",
+            Bucket=bucket,
             Key="processed/season_2024_25/gw20_features_training.parquet",
-            Body=buffer.getvalue()
+            Body=buffer.getvalue(),
         )
 
         # Download and verify
         response = s3.get_object(
-            Bucket="fpl-ml-data",
-            Key="processed/season_2024_25/gw20_features_training.parquet"
+            Bucket=bucket,
+            Key="processed/season_2024_25/gw20_features_training.parquet",
         )
         df = pd.read_parquet(io.BytesIO(response["Body"].read()))
 
@@ -77,14 +82,12 @@ class TestS3DataLoading:
         for col in FEATURE_COLS:
             assert col in df.columns
 
-    @mock_aws
-    def test_load_multiple_seasons(self, training_features_dataframe):
+    def test_load_multiple_seasons(
+        self, training_features_dataframe, localstack_s3_client, clean_s3_bucket
+    ):
         """Test loading training data from multiple seasons."""
-        s3 = boto3.client("s3", region_name="ap-southeast-2")
-        s3.create_bucket(
-            Bucket="fpl-ml-data",
-            CreateBucketConfiguration={"LocationConstraint": "ap-southeast-2"}
-        )
+        s3 = localstack_s3_client
+        bucket = clean_s3_bucket
 
         # Upload data for two seasons
         seasons = ["2023_24", "2024_25"]
@@ -94,81 +97,68 @@ class TestS3DataLoading:
             buffer.seek(0)
 
             s3.put_object(
-                Bucket="fpl-ml-data",
+                Bucket=bucket,
                 Key=f"processed/season_{season}/gw20_features_training.parquet",
-                Body=buffer.getvalue()
+                Body=buffer.getvalue(),
             )
 
         # List and verify
-        response = s3.list_objects_v2(
-            Bucket="fpl-ml-data",
-            Prefix="processed/"
-        )
+        response = s3.list_objects_v2(Bucket=bucket, Prefix="processed/")
 
         assert len(response["Contents"]) == 2
 
 
+@pytest.mark.integration
 class TestS3ModelSaving:
     """Tests for saving models to S3."""
 
-    @mock_aws
-    def test_save_model_to_s3(self, training_features_dataframe, tmp_path):
+    def test_save_model_to_s3(
+        self, training_features_dataframe, tmp_path, localstack_s3_client, clean_s3_bucket
+    ):
         """Test saving trained model to S3."""
+        s3 = localstack_s3_client
+        bucket = clean_s3_bucket
+
         # Train model locally
         model, _, _ = train_model(training_features_dataframe)
 
         # Save locally first
         local_path = save_model(model, str(tmp_path))
 
-        # Setup S3
-        s3 = boto3.client("s3", region_name="ap-southeast-2")
-        s3.create_bucket(
-            Bucket="fpl-ml-data",
-            CreateBucketConfiguration={"LocationConstraint": "ap-southeast-2"}
-        )
-
         # Upload to S3
         with open(local_path, "rb") as f:
             s3.put_object(
-                Bucket="fpl-ml-data",
+                Bucket=bucket,
                 Key="models/season_2024_25/model.xgb",
-                Body=f.read()
+                Body=f.read(),
             )
 
         # Verify upload
-        response = s3.head_object(
-            Bucket="fpl-ml-data",
-            Key="models/season_2024_25/model.xgb"
-        )
+        response = s3.head_object(Bucket=bucket, Key="models/season_2024_25/model.xgb")
 
         assert response["ContentLength"] > 0
 
-    @mock_aws
-    def test_load_model_from_s3(self, training_features_dataframe, tmp_path):
+    def test_load_model_from_s3(
+        self, training_features_dataframe, tmp_path, localstack_s3_client, clean_s3_bucket
+    ):
         """Test loading model from S3 and making predictions."""
+        s3 = localstack_s3_client
+        bucket = clean_s3_bucket
+
         # Train and save locally
         model, X_test, y_test = train_model(training_features_dataframe)
         local_path = save_model(model, str(tmp_path))
 
         # Upload to S3
-        s3 = boto3.client("s3", region_name="ap-southeast-2")
-        s3.create_bucket(
-            Bucket="fpl-ml-data",
-            CreateBucketConfiguration={"LocationConstraint": "ap-southeast-2"}
-        )
-
         with open(local_path, "rb") as f:
             s3.put_object(
-                Bucket="fpl-ml-data",
+                Bucket=bucket,
                 Key="models/season_2024_25/model.xgb",
-                Body=f.read()
+                Body=f.read(),
             )
 
         # Download from S3
-        response = s3.get_object(
-            Bucket="fpl-ml-data",
-            Key="models/season_2024_25/model.xgb"
-        )
+        response = s3.get_object(Bucket=bucket, Key="models/season_2024_25/model.xgb")
 
         download_path = tmp_path / "downloaded_model.xgb"
         with open(download_path, "wb") as f:
@@ -184,18 +174,16 @@ class TestS3ModelSaving:
         assert all(np.issubdtype(type(p), np.number) for p in predictions)
 
 
+@pytest.mark.integration
 class TestEndToEndTraining:
     """End-to-end training pipeline tests."""
 
-    @mock_aws
-    def test_full_training_pipeline(self, training_features_dataframe, tmp_path):
+    def test_full_training_pipeline(
+        self, training_features_dataframe, tmp_path, localstack_s3_client, clean_s3_bucket
+    ):
         """Test complete training pipeline: load -> train -> evaluate -> save."""
-        # Setup S3
-        s3 = boto3.client("s3", region_name="ap-southeast-2")
-        s3.create_bucket(
-            Bucket="fpl-ml-data",
-            CreateBucketConfiguration={"LocationConstraint": "ap-southeast-2"}
-        )
+        s3 = localstack_s3_client
+        bucket = clean_s3_bucket
 
         # Upload training data
         buffer = io.BytesIO()
@@ -203,15 +191,15 @@ class TestEndToEndTraining:
         buffer.seek(0)
 
         s3.put_object(
-            Bucket="fpl-ml-data",
+            Bucket=bucket,
             Key="processed/season_2024_25/gw20_features_training.parquet",
-            Body=buffer.getvalue()
+            Body=buffer.getvalue(),
         )
 
         # Download training data
         response = s3.get_object(
-            Bucket="fpl-ml-data",
-            Key="processed/season_2024_25/gw20_features_training.parquet"
+            Bucket=bucket,
+            Key="processed/season_2024_25/gw20_features_training.parquet",
         )
         df = pd.read_parquet(io.BytesIO(response["Body"].read()))
 
@@ -231,36 +219,31 @@ class TestEndToEndTraining:
         # Upload model to S3
         with open(model_path, "rb") as f:
             s3.put_object(
-                Bucket="fpl-ml-data",
+                Bucket=bucket,
                 Key="models/season_2024_25/model.xgb",
-                Body=f.read()
+                Body=f.read(),
             )
 
         # Upload metrics to S3
         s3.put_object(
-            Bucket="fpl-ml-data",
+            Bucket=bucket,
             Key="models/season_2024_25/metrics.json",
-            Body=json.dumps(metrics)
+            Body=json.dumps(metrics),
         )
 
         # Verify all artifacts exist
-        objects = s3.list_objects_v2(
-            Bucket="fpl-ml-data",
-            Prefix="models/"
-        )
+        objects = s3.list_objects_v2(Bucket=bucket, Prefix="models/")
 
         keys = [obj["Key"] for obj in objects["Contents"]]
         assert "models/season_2024_25/model.xgb" in keys
         assert "models/season_2024_25/metrics.json" in keys
 
-    @mock_aws
-    def test_cross_season_training(self, training_features_dataframe, tmp_path):
+    def test_cross_season_training(
+        self, training_features_dataframe, tmp_path, localstack_s3_client, clean_s3_bucket
+    ):
         """Test training on data from multiple seasons."""
-        s3 = boto3.client("s3", region_name="ap-southeast-2")
-        s3.create_bucket(
-            Bucket="fpl-ml-data",
-            CreateBucketConfiguration={"LocationConstraint": "ap-southeast-2"}
-        )
+        s3 = localstack_s3_client
+        bucket = clean_s3_bucket
 
         # Upload data for multiple gameweeks across seasons
         seasons_gws = [
@@ -276,20 +259,17 @@ class TestEndToEndTraining:
             buffer.seek(0)
 
             s3.put_object(
-                Bucket="fpl-ml-data",
+                Bucket=bucket,
                 Key=f"processed/season_{season}/gw{gw}_features_training.parquet",
-                Body=buffer.getvalue()
+                Body=buffer.getvalue(),
             )
 
         # Combine all training data
         all_dfs = []
-        response = s3.list_objects_v2(
-            Bucket="fpl-ml-data",
-            Prefix="processed/"
-        )
+        response = s3.list_objects_v2(Bucket=bucket, Prefix="processed/")
 
         for obj in response["Contents"]:
-            data = s3.get_object(Bucket="fpl-ml-data", Key=obj["Key"])
+            data = s3.get_object(Bucket=bucket, Key=obj["Key"])
             df = pd.read_parquet(io.BytesIO(data["Body"].read()))
             all_dfs.append(df)
 
@@ -304,12 +284,17 @@ class TestEndToEndTraining:
         assert metrics["mae"] >= 0
 
 
+@pytest.mark.integration
 class TestPredictionSaving:
     """Tests for saving predictions to S3."""
 
-    @mock_aws
-    def test_save_predictions_parquet(self, training_features_dataframe, tmp_path):
+    def test_save_predictions_parquet(
+        self, training_features_dataframe, tmp_path, localstack_s3_client, clean_s3_bucket
+    ):
         """Test saving predictions as Parquet to S3."""
+        s3 = localstack_s3_client
+        bucket = clean_s3_bucket
+
         # Train model
         model, X_test, y_test = train_model(training_features_dataframe)
 
@@ -318,15 +303,10 @@ class TestPredictionSaving:
         predictions = model.predict(X_all)
 
         # Create predictions DataFrame
-        pred_df = training_features_dataframe[["player_id", "player_name", "gameweek"]].copy()
+        pred_df = training_features_dataframe[
+            ["player_id", "player_name", "gameweek"]
+        ].copy()
         pred_df["predicted_points"] = predictions
-
-        # Setup S3
-        s3 = boto3.client("s3", region_name="ap-southeast-2")
-        s3.create_bucket(
-            Bucket="fpl-ml-data",
-            CreateBucketConfiguration={"LocationConstraint": "ap-southeast-2"}
-        )
 
         # Upload predictions
         buffer = io.BytesIO()
@@ -334,15 +314,15 @@ class TestPredictionSaving:
         buffer.seek(0)
 
         s3.put_object(
-            Bucket="fpl-ml-data",
+            Bucket=bucket,
             Key="predictions/season_2024_25/gw21_predictions.parquet",
-            Body=buffer.getvalue()
+            Body=buffer.getvalue(),
         )
 
         # Download and verify
         response = s3.get_object(
-            Bucket="fpl-ml-data",
-            Key="predictions/season_2024_25/gw21_predictions.parquet"
+            Bucket=bucket,
+            Key="predictions/season_2024_25/gw21_predictions.parquet",
         )
         loaded_pred_df = pd.read_parquet(io.BytesIO(response["Body"].read()))
 

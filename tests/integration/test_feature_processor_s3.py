@@ -1,9 +1,10 @@
 """
 Integration tests for feature_processor with S3.
 
-These tests use moto to mock AWS S3 and verify actual boto3 integration.
+These tests run against LocalStack when AWS_ENDPOINT_URL is set.
 Mark these tests with @pytest.mark.integration
 """
+
 import io
 import json
 import pytest
@@ -25,27 +26,27 @@ from lambdas.feature_processor.handler import (
 class TestFeatureProcessorS3Integration:
     """Integration tests for feature processor S3 operations."""
 
-    def test_load_bootstrap_from_s3(self, s3_client):
-        """Test loading bootstrap data from mocked S3."""
+    def test_load_bootstrap_from_s3(self, localstack_s3_client, clean_s3_bucket):
+        """Test loading bootstrap data from S3."""
+        s3_client = localstack_s3_client
+        bucket = clean_s3_bucket
+
         # Setup: save bootstrap data to S3
         bootstrap_data = {
             "events": [{"id": 20, "finished": True}],
             "elements": [{"id": 350, "web_name": "Salah", "team": 10}],
-            "teams": [{"id": 10, "name": "Liverpool", "strength": 5}]
+            "teams": [{"id": 10, "name": "Liverpool", "strength": 5}],
         }
 
         s3_client.put_object(
-            Bucket="fpl-ml-data",
+            Bucket=bucket,
             Key="raw/season_2024_25/gw20_bootstrap.json",
-            Body=json.dumps(bootstrap_data)
+            Body=json.dumps(bootstrap_data),
         )
 
         # Load using our function
         result = load_bootstrap_from_s3(
-            s3_client=s3_client,
-            bucket="fpl-ml-data",
-            gameweek=20,
-            season="2024_25"
+            s3_client=s3_client, bucket=bucket, gameweek=20, season="2024_25"
         )
 
         # Verify
@@ -53,72 +54,70 @@ class TestFeatureProcessorS3Integration:
         assert len(result["elements"]) == 1
         assert result["elements"][0]["web_name"] == "Salah"
 
-    def test_load_fixtures_from_s3(self, s3_client):
-        """Test loading fixtures data from mocked S3."""
-        fixtures_data = [
-            {"team_h": 10, "team_a": 1, "event": 20}
-        ]
+    def test_load_fixtures_from_s3(self, localstack_s3_client, clean_s3_bucket):
+        """Test loading fixtures data from S3."""
+        s3_client = localstack_s3_client
+        bucket = clean_s3_bucket
+
+        fixtures_data = [{"team_h": 10, "team_a": 1, "event": 20}]
 
         s3_client.put_object(
-            Bucket="fpl-ml-data",
+            Bucket=bucket,
             Key="raw/season_2024_25/gw20_fixtures.json",
-            Body=json.dumps(fixtures_data)
+            Body=json.dumps(fixtures_data),
         )
 
         result = load_fixtures_from_s3(
-            s3_client=s3_client,
-            bucket="fpl-ml-data",
-            gameweek=20,
-            season="2024_25"
+            s3_client=s3_client, bucket=bucket, gameweek=20, season="2024_25"
         )
 
         assert result == fixtures_data
         assert len(result) == 1
         assert result[0]["team_h"] == 10
 
-    def test_load_player_histories_missing_gracefully(self, s3_client):
+    def test_load_player_histories_missing_gracefully(
+        self, localstack_s3_client, clean_s3_bucket
+    ):
         """Test loading player histories when directory doesn't exist."""
+        s3_client = localstack_s3_client
+        bucket = clean_s3_bucket
+
         # Don't create any player files - should return empty dict
         result = load_player_histories_from_s3(
-            s3_client=s3_client,
-            bucket="fpl-ml-data",
-            gameweek=20,
-            season="2024_25"
+            s3_client=s3_client, bucket=bucket, gameweek=20, season="2024_25"
         )
 
         assert result == {}
 
-    def test_load_player_histories_with_data(self, s3_client):
+    def test_load_player_histories_with_data(
+        self, localstack_s3_client, clean_s3_bucket
+    ):
         """Test loading player histories when files exist."""
+        s3_client = localstack_s3_client
+        bucket = clean_s3_bucket
+
         # Setup: save player history files
         salah_history = {
             "history": [
                 {"total_points": 8, "minutes": 90, "round": 18},
-                {"total_points": 12, "minutes": 90, "round": 19}
+                {"total_points": 12, "minutes": 90, "round": 19},
             ]
         }
-        haaland_history = {
-            "history": [
-                {"total_points": 15, "minutes": 90, "round": 18}
-            ]
-        }
+        haaland_history = {"history": [{"total_points": 15, "minutes": 90, "round": 18}]}
 
         s3_client.put_object(
-            Bucket="fpl-ml-data",
+            Bucket=bucket,
             Key="raw/season_2024_25/gw20_players/player_350.json",
-            Body=json.dumps(salah_history)
+            Body=json.dumps(salah_history),
         )
         s3_client.put_object(
-            Bucket="fpl-ml-data",
+            Bucket=bucket,
             Key="raw/season_2024_25/gw20_players/player_328.json",
-            Body=json.dumps(haaland_history)
+            Body=json.dumps(haaland_history),
         )
 
         result = load_player_histories_from_s3(
-            s3_client=s3_client,
-            bucket="fpl-ml-data",
-            gameweek=20,
-            season="2024_25"
+            s3_client=s3_client, bucket=bucket, gameweek=20, season="2024_25"
         )
 
         assert len(result) == 2
@@ -127,70 +126,79 @@ class TestFeatureProcessorS3Integration:
         assert len(result[350]) == 2
         assert result[350][0]["total_points"] == 8
 
-    def test_save_features_parquet_to_s3(self, s3_client):
+    def test_save_features_parquet_to_s3(self, localstack_s3_client, clean_s3_bucket):
         """Test saving features DataFrame as Parquet to S3."""
+        s3_client = localstack_s3_client
+        bucket = clean_s3_bucket
+
         # Create test DataFrame
-        df = pd.DataFrame({
-            "player_id": [350, 328],
-            "player_name": ["Salah", "Haaland"],
-            "points_last_3": [8.5, 7.2],
-            "form_score": [8.5, 7.2]
-        })
+        df = pd.DataFrame(
+            {
+                "player_id": [350, 328],
+                "player_name": ["Salah", "Haaland"],
+                "points_last_3": [8.5, 7.2],
+                "form_score": [8.5, 7.2],
+            }
+        )
 
         # Save to S3
         key = save_features_to_s3(
             s3_client=s3_client,
             df=df,
-            bucket="fpl-ml-data",
+            bucket=bucket,
             gameweek=20,
             season="2024_25",
-            mode="historical"
+            mode="historical",
         )
 
         # Verify key format
         assert key == "processed/season_2024_25/gw20_features_training.parquet"
 
         # Read back and verify
-        response = s3_client.get_object(
-            Bucket="fpl-ml-data",
-            Key=key
-        )
+        response = s3_client.get_object(Bucket=bucket, Key=key)
 
         # Parse Parquet
         buffer = io.BytesIO(response["Body"].read())
         loaded_df = pd.read_parquet(buffer)
 
         assert len(loaded_df) == 2
-        assert list(loaded_df.columns) == ["player_id", "player_name", "points_last_3", "form_score"]
+        assert list(loaded_df.columns) == [
+            "player_id",
+            "player_name",
+            "points_last_3",
+            "form_score",
+        ]
         assert loaded_df.iloc[0]["player_name"] == "Salah"
 
-    def test_save_features_prediction_mode(self, s3_client):
+    def test_save_features_prediction_mode(self, localstack_s3_client, clean_s3_bucket):
         """Test saving features in prediction mode uses correct filename."""
-        df = pd.DataFrame({
-            "player_id": [350],
-            "points_last_3": [8.5]
-        })
+        s3_client = localstack_s3_client
+        bucket = clean_s3_bucket
+
+        df = pd.DataFrame({"player_id": [350], "points_last_3": [8.5]})
 
         key = save_features_to_s3(
             s3_client=s3_client,
             df=df,
-            bucket="fpl-ml-data",
+            bucket=bucket,
             gameweek=21,
             season="2024_25",
-            mode="prediction"
+            mode="prediction",
         )
 
         assert key == "processed/season_2024_25/gw21_features_prediction.parquet"
 
         # Verify file exists
         response = s3_client.list_objects_v2(
-            Bucket="fpl-ml-data",
-            Prefix="processed/season_2024_25/gw21"
+            Bucket=bucket, Prefix="processed/season_2024_25/gw21"
         )
         assert response["KeyCount"] == 1
 
-    def test_end_to_end_historical_mode(self, s3_client):
+    def test_end_to_end_historical_mode(self, localstack_s3_client, clean_s3_bucket):
         """Test complete feature processing flow in historical mode."""
+        s3_client = localstack_s3_client
+        bucket = clean_s3_bucket
+
         # Setup: create all required input files
         bootstrap_data = {
             "events": [{"id": 20, "finished": True}],
@@ -202,13 +210,13 @@ class TestFeatureProcessorS3Integration:
                     "element_type": 3,
                     "form": "8.5",
                     "chance_of_playing_next_round": 100,
-                    "minutes": 900
+                    "minutes": 900,
                 }
             ],
             "teams": [
                 {"id": 1, "name": "Arsenal", "strength": 4},
-                {"id": 10, "name": "Liverpool", "strength": 5}
-            ]
+                {"id": 10, "name": "Liverpool", "strength": 5},
+            ],
         }
 
         fixtures_data = [
@@ -219,34 +227,32 @@ class TestFeatureProcessorS3Integration:
             "history": [
                 {"total_points": 8, "minutes": 90, "round": 18},
                 {"total_points": 12, "minutes": 90, "round": 19},
-                {"total_points": 6, "minutes": 90, "round": 20}
+                {"total_points": 6, "minutes": 90, "round": 20},
             ]
         }
 
         # Save input data to S3
         s3_client.put_object(
-            Bucket="fpl-ml-data",
+            Bucket=bucket,
             Key="raw/season_2024_25/gw20_bootstrap.json",
-            Body=json.dumps(bootstrap_data)
+            Body=json.dumps(bootstrap_data),
         )
         s3_client.put_object(
-            Bucket="fpl-ml-data",
+            Bucket=bucket,
             Key="raw/season_2024_25/gw20_fixtures.json",
-            Body=json.dumps(fixtures_data)
+            Body=json.dumps(fixtures_data),
         )
         s3_client.put_object(
-            Bucket="fpl-ml-data",
+            Bucket=bucket,
             Key="raw/season_2024_25/gw20_players/player_350.json",
-            Body=json.dumps(player_history)
+            Body=json.dumps(player_history),
         )
 
         # Invoke handler
-        with patch('lambdas.feature_processor.handler.get_s3_client', return_value=s3_client):
-            event = {
-                "gameweek": 20,
-                "season": "2024_25",
-                "mode": "historical"
-            }
+        with patch(
+            "lambdas.feature_processor.handler.get_s3_client", return_value=s3_client
+        ):
+            event = {"gameweek": 20, "season": "2024_25", "mode": "historical"}
             result = handler(event, None)
 
         # Verify response
@@ -260,10 +266,7 @@ class TestFeatureProcessorS3Integration:
         assert output_key == "processed/season_2024_25/gw20_features_training.parquet"
 
         # Read and verify output
-        response = s3_client.get_object(
-            Bucket="fpl-ml-data",
-            Key=output_key
-        )
+        response = s3_client.get_object(Bucket=bucket, Key=output_key)
         buffer = io.BytesIO(response["Body"].read())
         df = pd.read_parquet(buffer)
 
@@ -275,8 +278,11 @@ class TestFeatureProcessorS3Integration:
         assert df.iloc[0]["opponent_strength"] == 4  # Arsenal's strength
         assert "actual_points" in df.columns  # Historical mode includes target
 
-    def test_end_to_end_prediction_mode(self, s3_client):
+    def test_end_to_end_prediction_mode(self, localstack_s3_client, clean_s3_bucket):
         """Test complete feature processing flow in prediction mode."""
+        s3_client = localstack_s3_client
+        bucket = clean_s3_bucket
+
         # Setup: create input files (no player histories)
         bootstrap_data = {
             "events": [],
@@ -288,13 +294,13 @@ class TestFeatureProcessorS3Integration:
                     "element_type": 3,
                     "form": "8.5",
                     "chance_of_playing_next_round": 100,
-                    "minutes": 1800
+                    "minutes": 1800,
                 }
             ],
             "teams": [
                 {"id": 1, "name": "Arsenal", "strength": 4},
-                {"id": 10, "name": "Liverpool", "strength": 5}
-            ]
+                {"id": 10, "name": "Liverpool", "strength": 5},
+            ],
         }
 
         fixtures_data = [
@@ -302,23 +308,21 @@ class TestFeatureProcessorS3Integration:
         ]
 
         s3_client.put_object(
-            Bucket="fpl-ml-data",
+            Bucket=bucket,
             Key="raw/season_2024_25/gw21_bootstrap.json",
-            Body=json.dumps(bootstrap_data)
+            Body=json.dumps(bootstrap_data),
         )
         s3_client.put_object(
-            Bucket="fpl-ml-data",
+            Bucket=bucket,
             Key="raw/season_2024_25/gw21_fixtures.json",
-            Body=json.dumps(fixtures_data)
+            Body=json.dumps(fixtures_data),
         )
 
         # Invoke handler in prediction mode (no player histories)
-        with patch('lambdas.feature_processor.handler.get_s3_client', return_value=s3_client):
-            event = {
-                "gameweek": 21,
-                "season": "2024_25",
-                "mode": "prediction"
-            }
+        with patch(
+            "lambdas.feature_processor.handler.get_s3_client", return_value=s3_client
+        ):
+            event = {"gameweek": 21, "season": "2024_25", "mode": "prediction"}
             result = handler(event, None)
 
         # Verify response
@@ -330,10 +334,7 @@ class TestFeatureProcessorS3Integration:
         output_key = result["features_file"]
         assert "prediction" in output_key
 
-        response = s3_client.get_object(
-            Bucket="fpl-ml-data",
-            Key=output_key
-        )
+        response = s3_client.get_object(Bucket=bucket, Key=output_key)
         buffer = io.BytesIO(response["Body"].read())
         df = pd.read_parquet(buffer)
 
