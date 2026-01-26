@@ -44,6 +44,9 @@ FEATURE_COLS = [
     "form_x_difficulty",
 ]
 
+# Mapping from position string to numeric element_type
+POSITION_MAP = {"GK": 1, "DEF": 2, "MID": 3, "FWD": 4}
+
 
 def convert_season_format(vaastav_season: str) -> str:
     """
@@ -135,6 +138,27 @@ def build_team_strength_map(teams_df: pd.DataFrame) -> dict[int, int]:
     return strength_map
 
 
+def build_team_name_map(teams_df: pd.DataFrame) -> dict[str, int]:
+    """
+    Build a mapping from team name/short_name to team ID.
+
+    The vaastav gameweek CSVs use team names (e.g. "Man Utd") rather than
+    numeric IDs, so this mapping is needed to convert them.
+
+    Args:
+        teams_df: DataFrame from teams.csv
+
+    Returns:
+        Dict mapping team name to team ID
+    """
+    name_map = {}
+    for _, row in teams_df.iterrows():
+        team_id = int(row["id"])
+        name_map[row["name"]] = team_id
+        name_map[row["short_name"]] = team_id
+    return name_map
+
+
 def calculate_rolling_average(values: list[float], window: int) -> float:
     """
     Calculate rolling average over the last `window` values.
@@ -176,6 +200,7 @@ def engineer_historical_features(
     gameweek: int,
     player_history: dict[int, list[dict]],
     team_strength_map: dict[int, int],
+    team_name_to_id: dict[str, int] | None = None,
 ) -> pd.DataFrame:
     """
     Engineer training features from a single gameweek's data.
@@ -188,6 +213,7 @@ def engineer_historical_features(
         gameweek: Current gameweek number
         player_history: Dict mapping player name to list of prior GW dicts
         team_strength_map: Dict mapping team ID to strength (1-5)
+        team_name_to_id: Optional mapping from team name to numeric ID
 
     Returns:
         DataFrame with engineered features and actual_points target
@@ -237,11 +263,19 @@ def engineer_historical_features(
         # Actual points (target)
         actual_points = int(row.get("total_points", 0))
 
-        # Team ID
-        team_id = int(row.get("team", row.get("team_id", 0)))
+        # Team ID (vaastav GW CSVs use team name strings, not numeric IDs)
+        team_raw = row.get("team", row.get("team_id", 0))
+        if isinstance(team_raw, str) and team_name_to_id:
+            team_id = team_name_to_id.get(team_raw, 0)
+        else:
+            team_id = int(team_raw)
 
-        # Position (element_type)
-        position = int(row.get("element_type", row.get("position", 0)))
+        # Position (vaastav GW CSVs use strings like "DEF", "FWD", etc.)
+        pos_raw = row.get("element_type", row.get("position", 0))
+        if isinstance(pos_raw, str):
+            position = POSITION_MAP.get(pos_raw, 0)
+        else:
+            position = int(pos_raw)
 
         feature_row = {
             "player_id": player_id,
@@ -298,6 +332,7 @@ def process_season(
         return []
 
     team_strength_map = build_team_strength_map(teams_df)
+    team_name_to_id = build_team_name_map(teams_df)
     logger.info(f"Built team strength map with {len(team_strength_map)} teams")
 
     # Fetch all gameweek CSVs
@@ -331,7 +366,7 @@ def process_season(
         if gw >= min_gameweek:
             # Engineer features using accumulated history
             features_df = engineer_historical_features(
-                gw_df, gw, player_history, team_strength_map
+                gw_df, gw, player_history, team_strength_map, team_name_to_id
             )
 
             if len(features_df) > 0:
