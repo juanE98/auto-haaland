@@ -29,23 +29,46 @@ use_localstack = os.environ.get("AWS_ENDPOINT_URL") is not None
 @pytest.fixture
 def training_features_dataframe():
     """Sample training features DataFrame with actual_points."""
-    return pd.DataFrame({
-        "player_id": [350, 328, 233, 412, 567, 189, 234, 456, 789, 321],
-        "player_name": ["Salah", "Haaland", "Saka", "Palmer", "Son",
-                        "Isak", "Gordon", "Watkins", "Solanke", "Cunha"],
-        "team_id": [10, 11, 1, 4, 17, 14, 14, 2, 3, 20],
-        "position": [3, 4, 3, 3, 3, 4, 3, 4, 4, 4],
-        "gameweek": [20, 20, 20, 20, 20, 20, 20, 20, 20, 20],
-        "points_last_3": [7.3, 9.2, 8.0, 6.5, 5.8, 7.1, 4.5, 6.2, 5.0, 4.8],
-        "points_last_5": [6.8, 8.9, 7.5, 6.2, 5.5, 6.8, 4.2, 5.9, 4.8, 4.5],
-        "minutes_pct": [0.95, 1.0, 0.92, 0.88, 0.85, 0.90, 0.78, 0.95, 0.88, 0.82],
-        "form_score": [8.5, 9.8, 7.9, 6.8, 5.5, 7.2, 4.8, 6.5, 5.2, 4.9],
-        "opponent_strength": [3, 2, 4, 3, 5, 3, 2, 4, 3, 4],
-        "home_away": [1, 1, 0, 1, 0, 1, 1, 0, 1, 0],
-        "chance_of_playing": [100, 100, 100, 100, 75, 100, 100, 100, 50, 100],
-        "form_x_difficulty": [25.5, 19.6, 31.6, 20.4, 27.5, 21.6, 9.6, 26.0, 15.6, 19.6],
-        "actual_points": [8, 15, 6, 9, 2, 11, 5, 4, 7, 3],
-    })
+    return pd.DataFrame(
+        {
+            "player_id": [350, 328, 233, 412, 567, 189, 234, 456, 789, 321],
+            "player_name": [
+                "Salah",
+                "Haaland",
+                "Saka",
+                "Palmer",
+                "Son",
+                "Isak",
+                "Gordon",
+                "Watkins",
+                "Solanke",
+                "Cunha",
+            ],
+            "team_id": [10, 11, 1, 4, 17, 14, 14, 2, 3, 20],
+            "position": [3, 4, 3, 3, 3, 4, 3, 4, 4, 4],
+            "gameweek": [20, 20, 20, 20, 20, 20, 20, 20, 20, 20],
+            "points_last_3": [7.3, 9.2, 8.0, 6.5, 5.8, 7.1, 4.5, 6.2, 5.0, 4.8],
+            "points_last_5": [6.8, 8.9, 7.5, 6.2, 5.5, 6.8, 4.2, 5.9, 4.8, 4.5],
+            "minutes_pct": [0.95, 1.0, 0.92, 0.88, 0.85, 0.90, 0.78, 0.95, 0.88, 0.82],
+            "form_score": [8.5, 9.8, 7.9, 6.8, 5.5, 7.2, 4.8, 6.5, 5.2, 4.9],
+            "opponent_strength": [3, 2, 4, 3, 5, 3, 2, 4, 3, 4],
+            "home_away": [1, 1, 0, 1, 0, 1, 1, 0, 1, 0],
+            "chance_of_playing": [100, 100, 100, 100, 75, 100, 100, 100, 50, 100],
+            "form_x_difficulty": [
+                25.5,
+                19.6,
+                31.6,
+                20.4,
+                27.5,
+                21.6,
+                9.6,
+                26.0,
+                15.6,
+                19.6,
+            ],
+            "actual_points": [8, 15, 6, 9, 2, 11, 5, 4, 7, 3],
+        }
+    )
 
 
 @pytest.mark.integration
@@ -93,7 +116,9 @@ class TestS3DataLoading:
         seasons = ["2023_24", "2024_25"]
         for season in seasons:
             buffer = io.BytesIO()
-            training_features_dataframe.to_parquet(buffer, engine="pyarrow", index=False)
+            training_features_dataframe.to_parquet(
+                buffer, engine="pyarrow", index=False
+            )
             buffer.seek(0)
 
             s3.put_object(
@@ -113,7 +138,11 @@ class TestS3ModelSaving:
     """Tests for saving models to S3."""
 
     def test_save_model_to_s3(
-        self, training_features_dataframe, tmp_path, localstack_s3_client, clean_s3_bucket
+        self,
+        training_features_dataframe,
+        tmp_path,
+        localstack_s3_client,
+        clean_s3_bucket,
     ):
         """Test saving trained model to S3."""
         s3 = localstack_s3_client
@@ -139,7 +168,11 @@ class TestS3ModelSaving:
         assert response["ContentLength"] > 0
 
     def test_load_model_from_s3(
-        self, training_features_dataframe, tmp_path, localstack_s3_client, clean_s3_bucket
+        self,
+        training_features_dataframe,
+        tmp_path,
+        localstack_s3_client,
+        clean_s3_bucket,
     ):
         """Test loading model from S3 and making predictions."""
         s3 = localstack_s3_client
@@ -179,7 +212,11 @@ class TestEndToEndTraining:
     """End-to-end training pipeline tests."""
 
     def test_full_training_pipeline(
-        self, training_features_dataframe, tmp_path, localstack_s3_client, clean_s3_bucket
+        self,
+        training_features_dataframe,
+        tmp_path,
+        localstack_s3_client,
+        clean_s3_bucket,
     ):
         """Test complete training pipeline: load -> train -> evaluate -> save."""
         s3 = localstack_s3_client
@@ -239,7 +276,11 @@ class TestEndToEndTraining:
         assert "models/season_2024_25/metrics.json" in keys
 
     def test_cross_season_training(
-        self, training_features_dataframe, tmp_path, localstack_s3_client, clean_s3_bucket
+        self,
+        training_features_dataframe,
+        tmp_path,
+        localstack_s3_client,
+        clean_s3_bucket,
     ):
         """Test training on data from multiple seasons."""
         s3 = localstack_s3_client
@@ -255,7 +296,9 @@ class TestEndToEndTraining:
 
         for season, gw in seasons_gws:
             buffer = io.BytesIO()
-            training_features_dataframe.to_parquet(buffer, engine="pyarrow", index=False)
+            training_features_dataframe.to_parquet(
+                buffer, engine="pyarrow", index=False
+            )
             buffer.seek(0)
 
             s3.put_object(
@@ -289,7 +332,11 @@ class TestPredictionSaving:
     """Tests for saving predictions to S3."""
 
     def test_save_predictions_parquet(
-        self, training_features_dataframe, tmp_path, localstack_s3_client, clean_s3_bucket
+        self,
+        training_features_dataframe,
+        tmp_path,
+        localstack_s3_client,
+        clean_s3_bucket,
     ):
         """Test saving predictions as Parquet to S3."""
         s3 = localstack_s3_client

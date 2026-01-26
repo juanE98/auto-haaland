@@ -22,7 +22,9 @@ class MockLambdaContext:
     def __init__(self):
         self.function_name = "test-function"
         self.function_version = "$LATEST"
-        self.invoked_function_arn = "arn:aws:lambda:us-east-1:123456789012:function:test"
+        self.invoked_function_arn = (
+            "arn:aws:lambda:us-east-1:123456789012:function:test"
+        )
         self.memory_limit_in_mb = 128
         self.aws_request_id = "test-request-id"
         self.log_group_name = "/aws/lambda/test"
@@ -124,9 +126,7 @@ class TestGetPredictionsEndpoint:
     @patch("lambdas.api_handler.handler.get_table")
     def test_invalid_gameweek_returns_400(self, mock_get_table, mock_context):
         """Test invalid gameweek returns 400."""
-        event = make_api_event(
-            path="/predictions", query_params={"gameweek": "abc"}
-        )
+        event = make_api_event(path="/predictions", query_params={"gameweek": "abc"})
 
         response = handler(event, mock_context)
 
@@ -146,9 +146,7 @@ class TestGetPredictionsEndpoint:
         }
         mock_get_table.return_value = mock_table
 
-        event = make_api_event(
-            path="/predictions", query_params={"gameweek": "20"}
-        )
+        event = make_api_event(path="/predictions", query_params={"gameweek": "20"})
 
         response = handler(event, mock_context)
 
@@ -228,7 +226,11 @@ class TestGetPlayerPredictionEndpoint:
         """Test 'gw' query param works as alias for 'gameweek'."""
         mock_table = MagicMock()
         mock_table.get_item.return_value = {
-            "Item": {"player_id": 350, "gameweek": 20, "predicted_points": Decimal("8.5")}
+            "Item": {
+                "player_id": 350,
+                "gameweek": 20,
+                "predicted_points": Decimal("8.5"),
+            }
         }
         mock_get_table.return_value = mock_table
 
@@ -346,9 +348,7 @@ class TestComparePlayersEndpoint:
     @patch("lambdas.api_handler.handler.get_table")
     def test_missing_players_returns_400(self, mock_get_table, mock_context):
         """Test missing players returns 400."""
-        event = make_api_event(
-            path="/compare", query_params={"gameweek": "20"}
-        )
+        event = make_api_event(path="/compare", query_params={"gameweek": "20"})
 
         response = handler(event, mock_context)
 
@@ -359,9 +359,7 @@ class TestComparePlayersEndpoint:
     @patch("lambdas.api_handler.handler.get_table")
     def test_missing_gameweek_returns_400(self, mock_get_table, mock_context):
         """Test missing gameweek returns 400."""
-        event = make_api_event(
-            path="/compare", query_params={"players": "350,328"}
-        )
+        event = make_api_event(path="/compare", query_params={"players": "350,328"})
 
         response = handler(event, mock_context)
 
@@ -464,9 +462,7 @@ class TestCORSHeaders:
         mock_table.query.return_value = {"Items": []}
         mock_get_table.return_value = mock_table
 
-        event = make_api_event(
-            path="/predictions", query_params={"gameweek": "20"}
-        )
+        event = make_api_event(path="/predictions", query_params={"gameweek": "20"})
         event["headers"]["Origin"] = "http://localhost:3000"
 
         response = handler(event, mock_context)

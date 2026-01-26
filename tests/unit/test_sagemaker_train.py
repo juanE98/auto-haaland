@@ -57,17 +57,19 @@ class TestValidateFeatures:
     @pytest.fixture
     def valid_dataframe(self):
         """Create a valid training DataFrame."""
-        return pd.DataFrame({
-            "points_last_3": [7.3, 5.2, 8.0],
-            "points_last_5": [6.8, 4.9, 7.5],
-            "minutes_pct": [0.95, 0.88, 1.0],
-            "form_score": [8.5, 5.8, 7.9],
-            "opponent_strength": [3, 4, 2],
-            "home_away": [1, 0, 1],
-            "chance_of_playing": [100, 75, 100],
-            "form_x_difficulty": [25.5, 23.2, 15.8],
-            "actual_points": [8, 4, 12],
-        })
+        return pd.DataFrame(
+            {
+                "points_last_3": [7.3, 5.2, 8.0],
+                "points_last_5": [6.8, 4.9, 7.5],
+                "minutes_pct": [0.95, 0.88, 1.0],
+                "form_score": [8.5, 5.8, 7.9],
+                "opponent_strength": [3, 4, 2],
+                "home_away": [1, 0, 1],
+                "chance_of_playing": [100, 75, 100],
+                "form_x_difficulty": [25.5, 23.2, 15.8],
+                "actual_points": [8, 4, 12],
+            }
+        )
 
     def test_valid_dataframe_passes(self, valid_dataframe):
         """Verify valid DataFrame passes validation."""
@@ -88,10 +90,12 @@ class TestValidateFeatures:
 
     def test_multiple_missing_columns_raises(self):
         """Verify multiple missing columns are reported."""
-        df = pd.DataFrame({
-            "points_last_3": [1, 2, 3],
-            "actual_points": [4, 5, 6],
-        })
+        df = pd.DataFrame(
+            {
+                "points_last_3": [1, 2, 3],
+                "actual_points": [4, 5, 6],
+            }
+        )
         with pytest.raises(ValueError, match="Missing feature columns"):
             validate_features(df)
 
@@ -154,17 +158,30 @@ class TestTrainModel:
     def training_dataframe(self):
         """Create a training DataFrame with enough samples."""
         # Need enough samples for train/test split
-        return pd.DataFrame({
-            "points_last_3": [7.3, 5.2, 8.0, 4.5, 6.7, 9.1, 3.2, 7.8, 5.5, 8.9],
-            "points_last_5": [6.8, 4.9, 7.5, 4.2, 6.1, 8.5, 3.0, 7.2, 5.1, 8.3],
-            "minutes_pct": [0.95, 0.88, 1.0, 0.7, 0.9, 1.0, 0.5, 0.95, 0.85, 1.0],
-            "form_score": [8.5, 5.8, 7.9, 4.0, 6.5, 9.0, 3.5, 7.5, 5.5, 8.8],
-            "opponent_strength": [3, 4, 2, 5, 3, 2, 4, 3, 4, 2],
-            "home_away": [1, 0, 1, 0, 1, 1, 0, 1, 0, 1],
-            "chance_of_playing": [100, 75, 100, 50, 100, 100, 25, 100, 75, 100],
-            "form_x_difficulty": [25.5, 23.2, 15.8, 20.0, 19.5, 18.0, 14.0, 22.5, 22.0, 17.6],
-            "actual_points": [8, 4, 12, 2, 6, 15, 1, 9, 5, 11],
-        })
+        return pd.DataFrame(
+            {
+                "points_last_3": [7.3, 5.2, 8.0, 4.5, 6.7, 9.1, 3.2, 7.8, 5.5, 8.9],
+                "points_last_5": [6.8, 4.9, 7.5, 4.2, 6.1, 8.5, 3.0, 7.2, 5.1, 8.3],
+                "minutes_pct": [0.95, 0.88, 1.0, 0.7, 0.9, 1.0, 0.5, 0.95, 0.85, 1.0],
+                "form_score": [8.5, 5.8, 7.9, 4.0, 6.5, 9.0, 3.5, 7.5, 5.5, 8.8],
+                "opponent_strength": [3, 4, 2, 5, 3, 2, 4, 3, 4, 2],
+                "home_away": [1, 0, 1, 0, 1, 1, 0, 1, 0, 1],
+                "chance_of_playing": [100, 75, 100, 50, 100, 100, 25, 100, 75, 100],
+                "form_x_difficulty": [
+                    25.5,
+                    23.2,
+                    15.8,
+                    20.0,
+                    19.5,
+                    18.0,
+                    14.0,
+                    22.5,
+                    22.0,
+                    17.6,
+                ],
+                "actual_points": [8, 4, 12, 2, 6, 15, 1, 9, 5, 11],
+            }
+        )
 
     def test_train_returns_model(self, training_dataframe):
         """Verify training returns a valid XGBoost model."""
@@ -205,17 +222,30 @@ class TestEvaluateModel:
     @pytest.fixture
     def trained_model_and_data(self):
         """Create a trained model and test data."""
-        df = pd.DataFrame({
-            "points_last_3": [7.3, 5.2, 8.0, 4.5, 6.7, 9.1, 3.2, 7.8, 5.5, 8.9],
-            "points_last_5": [6.8, 4.9, 7.5, 4.2, 6.1, 8.5, 3.0, 7.2, 5.1, 8.3],
-            "minutes_pct": [0.95, 0.88, 1.0, 0.7, 0.9, 1.0, 0.5, 0.95, 0.85, 1.0],
-            "form_score": [8.5, 5.8, 7.9, 4.0, 6.5, 9.0, 3.5, 7.5, 5.5, 8.8],
-            "opponent_strength": [3, 4, 2, 5, 3, 2, 4, 3, 4, 2],
-            "home_away": [1, 0, 1, 0, 1, 1, 0, 1, 0, 1],
-            "chance_of_playing": [100, 75, 100, 50, 100, 100, 25, 100, 75, 100],
-            "form_x_difficulty": [25.5, 23.2, 15.8, 20.0, 19.5, 18.0, 14.0, 22.5, 22.0, 17.6],
-            "actual_points": [8, 4, 12, 2, 6, 15, 1, 9, 5, 11],
-        })
+        df = pd.DataFrame(
+            {
+                "points_last_3": [7.3, 5.2, 8.0, 4.5, 6.7, 9.1, 3.2, 7.8, 5.5, 8.9],
+                "points_last_5": [6.8, 4.9, 7.5, 4.2, 6.1, 8.5, 3.0, 7.2, 5.1, 8.3],
+                "minutes_pct": [0.95, 0.88, 1.0, 0.7, 0.9, 1.0, 0.5, 0.95, 0.85, 1.0],
+                "form_score": [8.5, 5.8, 7.9, 4.0, 6.5, 9.0, 3.5, 7.5, 5.5, 8.8],
+                "opponent_strength": [3, 4, 2, 5, 3, 2, 4, 3, 4, 2],
+                "home_away": [1, 0, 1, 0, 1, 1, 0, 1, 0, 1],
+                "chance_of_playing": [100, 75, 100, 50, 100, 100, 25, 100, 75, 100],
+                "form_x_difficulty": [
+                    25.5,
+                    23.2,
+                    15.8,
+                    20.0,
+                    19.5,
+                    18.0,
+                    14.0,
+                    22.5,
+                    22.0,
+                    17.6,
+                ],
+                "actual_points": [8, 4, 12, 2, 6, 15, 1, 9, 5, 11],
+            }
+        )
         model, X_test, y_test = train_model(df)
         return model, X_test, y_test
 
@@ -259,17 +289,19 @@ class TestGetFeatureImportance:
     @pytest.fixture
     def trained_model(self):
         """Create a simple trained model."""
-        df = pd.DataFrame({
-            "points_last_3": [7.3, 5.2, 8.0, 4.5, 6.7],
-            "points_last_5": [6.8, 4.9, 7.5, 4.2, 6.1],
-            "minutes_pct": [0.95, 0.88, 1.0, 0.7, 0.9],
-            "form_score": [8.5, 5.8, 7.9, 4.0, 6.5],
-            "opponent_strength": [3, 4, 2, 5, 3],
-            "home_away": [1, 0, 1, 0, 1],
-            "chance_of_playing": [100, 75, 100, 50, 100],
-            "form_x_difficulty": [25.5, 23.2, 15.8, 20.0, 19.5],
-            "actual_points": [8, 4, 12, 2, 6],
-        })
+        df = pd.DataFrame(
+            {
+                "points_last_3": [7.3, 5.2, 8.0, 4.5, 6.7],
+                "points_last_5": [6.8, 4.9, 7.5, 4.2, 6.1],
+                "minutes_pct": [0.95, 0.88, 1.0, 0.7, 0.9],
+                "form_score": [8.5, 5.8, 7.9, 4.0, 6.5],
+                "opponent_strength": [3, 4, 2, 5, 3],
+                "home_away": [1, 0, 1, 0, 1],
+                "chance_of_playing": [100, 75, 100, 50, 100],
+                "form_x_difficulty": [25.5, 23.2, 15.8, 20.0, 19.5],
+                "actual_points": [8, 4, 12, 2, 6],
+            }
+        )
         model, _, _ = train_model(df, test_size=0.2)
         return model
 
@@ -304,17 +336,19 @@ class TestSaveLoadModel:
     @pytest.fixture
     def trained_model(self):
         """Create a simple trained model."""
-        df = pd.DataFrame({
-            "points_last_3": [7.3, 5.2, 8.0, 4.5, 6.7],
-            "points_last_5": [6.8, 4.9, 7.5, 4.2, 6.1],
-            "minutes_pct": [0.95, 0.88, 1.0, 0.7, 0.9],
-            "form_score": [8.5, 5.8, 7.9, 4.0, 6.5],
-            "opponent_strength": [3, 4, 2, 5, 3],
-            "home_away": [1, 0, 1, 0, 1],
-            "chance_of_playing": [100, 75, 100, 50, 100],
-            "form_x_difficulty": [25.5, 23.2, 15.8, 20.0, 19.5],
-            "actual_points": [8, 4, 12, 2, 6],
-        })
+        df = pd.DataFrame(
+            {
+                "points_last_3": [7.3, 5.2, 8.0, 4.5, 6.7],
+                "points_last_5": [6.8, 4.9, 7.5, 4.2, 6.1],
+                "minutes_pct": [0.95, 0.88, 1.0, 0.7, 0.9],
+                "form_score": [8.5, 5.8, 7.9, 4.0, 6.5],
+                "opponent_strength": [3, 4, 2, 5, 3],
+                "home_away": [1, 0, 1, 0, 1],
+                "chance_of_playing": [100, 75, 100, 50, 100],
+                "form_x_difficulty": [25.5, 23.2, 15.8, 20.0, 19.5],
+                "actual_points": [8, 4, 12, 2, 6],
+            }
+        )
         model, _, _ = train_model(df, test_size=0.2)
         return model
 
@@ -350,16 +384,18 @@ class TestSaveLoadModel:
 
     def test_loaded_model_produces_same_predictions(self, trained_model, tmp_path):
         """Test loaded model produces same predictions as original."""
-        X = pd.DataFrame({
-            "points_last_3": [7.0],
-            "points_last_5": [6.5],
-            "minutes_pct": [0.9],
-            "form_score": [7.5],
-            "opponent_strength": [3],
-            "home_away": [1],
-            "chance_of_playing": [100],
-            "form_x_difficulty": [22.5],
-        })
+        X = pd.DataFrame(
+            {
+                "points_last_3": [7.0],
+                "points_last_5": [6.5],
+                "minutes_pct": [0.9],
+                "form_score": [7.5],
+                "opponent_strength": [3],
+                "home_away": [1],
+                "chance_of_playing": [100],
+                "form_x_difficulty": [22.5],
+            }
+        )
 
         original_pred = trained_model.predict(X)
 

@@ -5,6 +5,7 @@ Provides boto3 clients with proper configuration for both:
 - Local development (LocalStack)
 - Production (Real AWS)
 """
+
 import os
 import logging
 from typing import Optional
@@ -35,14 +36,10 @@ def get_s3_client(endpoint_url: Optional[str] = None):
     config = Config(
         region_name=os.getenv("AWS_DEFAULT_REGION", "ap-southeast-2"),
         signature_version="s3v4",
-        retries={"max_attempts": 3, "mode": "adaptive"}
+        retries={"max_attempts": 3, "mode": "adaptive"},
     )
 
-    return boto3.client(
-        "s3",
-        endpoint_url=endpoint_url,
-        config=config
-    )
+    return boto3.client("s3", endpoint_url=endpoint_url, config=config)
 
 
 def get_dynamodb_resource(endpoint_url: Optional[str] = None):
@@ -63,14 +60,10 @@ def get_dynamodb_resource(endpoint_url: Optional[str] = None):
 
     config = Config(
         region_name=os.getenv("AWS_DEFAULT_REGION", "ap-southeast-2"),
-        retries={"max_attempts": 3, "mode": "adaptive"}
+        retries={"max_attempts": 3, "mode": "adaptive"},
     )
 
-    return boto3.resource(
-        "dynamodb",
-        endpoint_url=endpoint_url,
-        config=config
-    )
+    return boto3.resource("dynamodb", endpoint_url=endpoint_url, config=config)
 
 
 def get_stepfunctions_client(endpoint_url: Optional[str] = None):
@@ -90,11 +83,7 @@ def get_stepfunctions_client(endpoint_url: Optional[str] = None):
 
     config = Config(
         region_name=os.getenv("AWS_DEFAULT_REGION", "ap-southeast-2"),
-        retries={"max_attempts": 3, "mode": "adaptive"}
+        retries={"max_attempts": 3, "mode": "adaptive"},
     )
 
-    return boto3.client(
-        "stepfunctions",
-        endpoint_url=endpoint_url,
-        config=config
-    )
+    return boto3.client("stepfunctions", endpoint_url=endpoint_url, config=config)

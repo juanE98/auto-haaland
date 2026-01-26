@@ -83,25 +83,30 @@ def get_client(ctx) -> FPLClient:
     base_url = ctx.obj.get("base_url")
     if not base_url:
         click.echo("Error: --endpoint or --local required", err=True)
-        click.echo("Set API_ENDPOINT env var or use --local for local testing", err=True)
+        click.echo(
+            "Set API_ENDPOINT env var or use --local for local testing", err=True
+        )
         ctx.exit(1)
     return FPLClient(base_url)
 
 
 @cli.command()
 @click.option(
-    "--gameweek", "-g",
+    "--gameweek",
+    "-g",
     required=True,
     type=int,
     help="Gameweek number",
 )
 @click.option(
-    "--position", "-p",
+    "--position",
+    "-p",
     type=click.Choice(["GKP", "DEF", "MID", "FWD"], case_sensitive=False),
     help="Filter by position",
 )
 @click.option(
-    "--limit", "-n",
+    "--limit",
+    "-n",
     default=10,
     type=int,
     help="Number of results (default: 10)",
@@ -144,7 +149,8 @@ def top(ctx, gameweek: int, position: str | None, limit: int):
 @cli.command()
 @click.argument("player_id", type=int)
 @click.option(
-    "--gameweek", "-g",
+    "--gameweek",
+    "-g",
     type=int,
     help="Specific gameweek (omit for all)",
 )
@@ -175,13 +181,16 @@ def player(ctx, player_id: int, gameweek: int | None):
         ]
         click.echo(tabulate(table_data, headers=["Gameweek", "Points"]))
     else:
-        click.echo(f"Gameweek {data['gameweek']}: {format_points(data['predicted_points'])} pts")
+        click.echo(
+            f"Gameweek {data['gameweek']}: {format_points(data['predicted_points'])} pts"
+        )
 
 
 @cli.command()
 @click.argument("players")
 @click.option(
-    "--gameweek", "-g",
+    "--gameweek",
+    "-g",
     required=True,
     type=int,
     help="Gameweek number",
@@ -234,13 +243,15 @@ def compare(ctx, players: str, gameweek: int):
 
 @cli.command()
 @click.option(
-    "--gameweek", "-g",
+    "--gameweek",
+    "-g",
     required=True,
     type=int,
     help="Gameweek number",
 )
 @click.option(
-    "--limit", "-n",
+    "--limit",
+    "-n",
     default=100,
     type=int,
     help="Number of results (default: 100)",
@@ -290,7 +301,9 @@ def predictions(ctx, gameweek: int, limit: int):
 def run(state_machine: str | None, region: str):
     """Trigger the FPL prediction pipeline."""
     if not state_machine:
-        click.echo("Error: --state-machine or STATE_MACHINE_ARN env var required", err=True)
+        click.echo(
+            "Error: --state-machine or STATE_MACHINE_ARN env var required", err=True
+        )
         sys.exit(1)
 
     client = boto3.client("stepfunctions", region_name=region)
@@ -306,7 +319,9 @@ def run(state_machine: str | None, region: str):
         click.echo(f"Execution ARN: {execution_arn}")
         click.echo()
         click.echo("Check status with:")
-        click.echo(f"  aws stepfunctions describe-execution --execution-arn {execution_arn}")
+        click.echo(
+            f"  aws stepfunctions describe-execution --execution-arn {execution_arn}"
+        )
     except client.exceptions.StateMachineDoesNotExist:
         click.echo(f"Error: State machine not found: {state_machine}", err=True)
         sys.exit(1)

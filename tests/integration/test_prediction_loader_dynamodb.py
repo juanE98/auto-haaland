@@ -20,15 +20,17 @@ from lambdas.prediction_loader.handler import (
 @pytest.fixture
 def predictions_dataframe():
     """Sample predictions DataFrame."""
-    return pd.DataFrame({
-        "player_id": [350, 328, 233, 412, 567],
-        "player_name": ["Salah", "Haaland", "Saka", "Palmer", "Son"],
-        "team_id": [10, 11, 1, 4, 17],
-        "position": [3, 4, 3, 3, 3],
-        "gameweek": [20, 20, 20, 20, 20],
-        "predicted_points": [8.5, 12.3, 6.8, 9.2, 5.5],
-        "season": ["2024_25", "2024_25", "2024_25", "2024_25", "2024_25"],
-    })
+    return pd.DataFrame(
+        {
+            "player_id": [350, 328, 233, 412, 567],
+            "player_name": ["Salah", "Haaland", "Saka", "Palmer", "Son"],
+            "team_id": [10, 11, 1, 4, 17],
+            "position": [3, 4, 3, 3, 3],
+            "gameweek": [20, 20, 20, 20, 20],
+            "predicted_points": [8.5, 12.3, 6.8, 9.2, 5.5],
+            "season": ["2024_25", "2024_25", "2024_25", "2024_25", "2024_25"],
+        }
+    )
 
 
 class TestDynamoDBBatchWrite:
@@ -40,8 +42,7 @@ class TestDynamoDBBatchWrite:
         """Test batch write creates items in DynamoDB."""
         # Convert and write predictions
         predictions = [
-            convert_to_dynamodb_item(row)
-            for _, row in predictions_dataframe.iterrows()
+            convert_to_dynamodb_item(row) for _, row in predictions_dataframe.iterrows()
         ]
 
         result = batch_write_predictions(clean_dynamodb_table, predictions)
@@ -57,16 +58,13 @@ class TestDynamoDBBatchWrite:
     ):
         """Test batch write preserves all data fields."""
         predictions = [
-            convert_to_dynamodb_item(row)
-            for _, row in predictions_dataframe.iterrows()
+            convert_to_dynamodb_item(row) for _, row in predictions_dataframe.iterrows()
         ]
 
         batch_write_predictions(clean_dynamodb_table, predictions)
 
         # Get specific item
-        response = clean_dynamodb_table.get_item(
-            Key={"player_id": 350, "gameweek": 20}
-        )
+        response = clean_dynamodb_table.get_item(Key={"player_id": 350, "gameweek": 20})
         item = response["Item"]
 
         assert item["player_id"] == 350
@@ -81,14 +79,11 @@ class TestDynamoDBBatchWrite:
 class TestDynamoDBQuery:
     """Integration tests for querying DynamoDB."""
 
-    def test_query_by_gameweek_gsi(
-        self, predictions_dataframe, clean_dynamodb_table
-    ):
+    def test_query_by_gameweek_gsi(self, predictions_dataframe, clean_dynamodb_table):
         """Test querying predictions by gameweek using GSI."""
         # Write predictions
         predictions = [
-            convert_to_dynamodb_item(row)
-            for _, row in predictions_dataframe.iterrows()
+            convert_to_dynamodb_item(row) for _, row in predictions_dataframe.iterrows()
         ]
         batch_write_predictions(clean_dynamodb_table, predictions)
 
@@ -104,13 +99,10 @@ class TestDynamoDBQuery:
         points = [item["predicted_points"] for item in response["Items"]]
         assert points == sorted(points, reverse=True)
 
-    def test_query_by_position_gsi(
-        self, predictions_dataframe, clean_dynamodb_table
-    ):
+    def test_query_by_position_gsi(self, predictions_dataframe, clean_dynamodb_table):
         """Test querying predictions by position using GSI."""
         predictions = [
-            convert_to_dynamodb_item(row)
-            for _, row in predictions_dataframe.iterrows()
+            convert_to_dynamodb_item(row) for _, row in predictions_dataframe.iterrows()
         ]
         batch_write_predictions(clean_dynamodb_table, predictions)
 
@@ -136,8 +128,7 @@ class TestDeleteGameweekPredictions:
         """Test deleting existing predictions for a gameweek."""
         # Write initial predictions
         predictions = [
-            convert_to_dynamodb_item(row)
-            for _, row in predictions_dataframe.iterrows()
+            convert_to_dynamodb_item(row) for _, row in predictions_dataframe.iterrows()
         ]
         batch_write_predictions(clean_dynamodb_table, predictions)
 
@@ -160,8 +151,7 @@ class TestDeleteGameweekPredictions:
         """Test delete only removes target gameweek, not others."""
         # Write GW20 predictions
         predictions_gw20 = [
-            convert_to_dynamodb_item(row)
-            for _, row in predictions_dataframe.iterrows()
+            convert_to_dynamodb_item(row) for _, row in predictions_dataframe.iterrows()
         ]
         batch_write_predictions(clean_dynamodb_table, predictions_gw20)
 

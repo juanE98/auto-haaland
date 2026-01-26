@@ -4,6 +4,7 @@ Feature Processor Lambda Handler
 Reads raw FPL data from S3, engineers ML features, and outputs Parquet files
 for model training and predictions.
 """
+
 import io
 import json
 import logging
@@ -76,7 +77,9 @@ def load_player_histories_from_s3(
                     data = load_json_from_s3(s3_client, bucket, key)
                     # Extract player_id from filename: player_350.json
                     filename = key.split("/")[-1]
-                    player_id = int(filename.replace("player_", "").replace(".json", ""))
+                    player_id = int(
+                        filename.replace("player_", "").replace(".json", "")
+                    )
                     # Player summary contains "history" key with list of gameweek data
                     histories[player_id] = data.get("history", [])
                 except Exception as e:
@@ -140,9 +143,7 @@ def get_team_strength(teams: List[Dict], team_id: int) -> int:
 
 
 def get_opponent_info(
-    player_team_id: int,
-    fixtures: List[Dict],
-    teams: List[Dict]
+    player_team_id: int, fixtures: List[Dict], teams: List[Dict]
 ) -> Tuple[int, int]:
     """
     Get opponent strength and home/away status from fixtures.
@@ -174,7 +175,7 @@ def engineer_features(
     fixtures: List[Dict[str, Any]],
     player_histories: Dict[int, List[Dict[str, Any]]],
     mode: str,
-    gameweek: int
+    gameweek: int,
 ) -> pd.DataFrame:
     """
     Engineer ML features from raw FPL data.
@@ -245,7 +246,7 @@ def engineer_features(
             "opponent_strength": opponent_strength,
             "home_away": home_away,
             "chance_of_playing": chance_of_playing,
-            "form_x_difficulty": round(form_x_difficulty, 2)
+            "form_x_difficulty": round(form_x_difficulty, 2),
         }
 
         # Add actual points for historical mode (training target)
@@ -256,7 +257,9 @@ def engineer_features(
                 row["actual_points"] = gw_data[0].get("total_points", 0)
             else:
                 # Use last known points
-                row["actual_points"] = history[-1].get("total_points", 0) if history else 0
+                row["actual_points"] = (
+                    history[-1].get("total_points", 0) if history else 0
+                )
 
         features.append(row)
 
@@ -267,12 +270,7 @@ def engineer_features(
 
 
 def save_features_to_s3(
-    s3_client,
-    df: pd.DataFrame,
-    bucket: str,
-    gameweek: int,
-    season: str,
-    mode: str
+    s3_client, df: pd.DataFrame, bucket: str, gameweek: int, season: str, mode: str
 ) -> str:
     """
     Save features DataFrame to S3 as Parquet.
@@ -294,7 +292,7 @@ def save_features_to_s3(
         Bucket=bucket,
         Key=key,
         Body=buffer.getvalue(),
-        ContentType="application/octet-stream"
+        ContentType="application/octet-stream",
     )
 
     logger.info(f"Successfully saved {len(df)} rows to {key}")
@@ -332,21 +330,15 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
     # Validate inputs
     if gameweek is None:
-        return {
-            "statusCode": 400,
-            "error": "Missing required field: gameweek"
-        }
+        return {"statusCode": 400, "error": "Missing required field: gameweek"}
 
     if season is None:
-        return {
-            "statusCode": 400,
-            "error": "Missing required field: season"
-        }
+        return {"statusCode": 400, "error": "Missing required field: season"}
 
     if mode not in ("historical", "prediction"):
         return {
             "statusCode": 400,
-            "error": f"Invalid mode: {mode}. Must be 'historical' or 'prediction'"
+            "error": f"Invalid mode: {mode}. Must be 'historical' or 'prediction'",
         }
 
     # Initialize S3 client
@@ -378,7 +370,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             "mode": mode,
             "features_file": features_file,
             "rows_processed": len(df),
-            "timestamp": datetime.utcnow().isoformat() + "Z"
+            "timestamp": datetime.utcnow().isoformat() + "Z",
         }
 
     except ClientError as e:
@@ -388,31 +380,19 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             return {
                 "statusCode": 404,
                 "error": "Required data not found in S3",
-                "message": str(e)
+                "message": str(e),
             }
         logger.error(f"AWS error: {e}", exc_info=True)
-        return {
-            "statusCode": 500,
-            "error": "AWS error",
-            "message": str(e)
-        }
+        return {"statusCode": 500, "error": "AWS error", "message": str(e)}
 
     except Exception as e:
         logger.error(f"Unexpected error: {e}", exc_info=True)
-        return {
-            "statusCode": 500,
-            "error": "Internal error",
-            "message": str(e)
-        }
+        return {"statusCode": 500, "error": "Internal error", "message": str(e)}
 
 
 # For local testing
 if __name__ == "__main__":
-    test_event = {
-        "gameweek": 20,
-        "season": "2024_25",
-        "mode": "historical"
-    }
+    test_event = {"gameweek": 20, "season": "2024_25", "mode": "historical"}
 
     os.environ["AWS_ENDPOINT_URL"] = "http://localhost:4566"
 

@@ -1,6 +1,7 @@
 """
 Unit tests for feature_processor Lambda handler.
 """
+
 import json
 import pytest
 from unittest.mock import Mock, patch, MagicMock
@@ -59,31 +60,20 @@ class TestCalculateMinutesPct:
 
     def test_full_minutes(self):
         """Test player who played all 90 minutes."""
-        history = [
-            {"minutes": 90},
-            {"minutes": 90},
-            {"minutes": 90}
-        ]
+        history = [{"minutes": 90}, {"minutes": 90}, {"minutes": 90}]
         result = calculate_minutes_pct(history, window=3)
         assert result == pytest.approx(1.0, rel=0.01)
 
     def test_partial_minutes(self):
         """Test player with partial minutes."""
-        history = [
-            {"minutes": 45},
-            {"minutes": 90},
-            {"minutes": 45}
-        ]
+        history = [{"minutes": 45}, {"minutes": 90}, {"minutes": 45}]
         # Total: 180, Max: 270 -> 180/270 = 0.667
         result = calculate_minutes_pct(history, window=3)
         assert result == pytest.approx(0.667, rel=0.01)
 
     def test_no_minutes(self):
         """Test player who didn't play."""
-        history = [
-            {"minutes": 0},
-            {"minutes": 0}
-        ]
+        history = [{"minutes": 0}, {"minutes": 0}]
         result = calculate_minutes_pct(history, window=5)
         assert result == 0.0
 
@@ -107,7 +97,7 @@ class TestGetTeamStrength:
         """Test getting strength for existing team."""
         teams = [
             {"id": 1, "name": "Arsenal", "strength": 4},
-            {"id": 10, "name": "Liverpool", "strength": 5}
+            {"id": 10, "name": "Liverpool", "strength": 5},
         ]
         result = get_team_strength(teams, team_id=10)
         assert result == 5
@@ -135,7 +125,7 @@ class TestGetOpponentInfo:
         ]
         teams = [
             {"id": 1, "name": "Arsenal", "strength": 4},
-            {"id": 10, "name": "Liverpool", "strength": 5}
+            {"id": 10, "name": "Liverpool", "strength": 5},
         ]
 
         opponent_strength, is_home = get_opponent_info(
@@ -152,7 +142,7 @@ class TestGetOpponentInfo:
         ]
         teams = [
             {"id": 1, "name": "Arsenal", "strength": 4},
-            {"id": 10, "name": "Liverpool", "strength": 5}
+            {"id": 10, "name": "Liverpool", "strength": 5},
         ]
 
         opponent_strength, is_home = get_opponent_info(
@@ -164,13 +154,8 @@ class TestGetOpponentInfo:
 
     def test_no_fixture_found(self):
         """Test when team has no fixture (blank gameweek)."""
-        fixtures = [
-            {"team_h": 1, "team_a": 2}  # Fixture doesn't include team 10
-        ]
-        teams = [
-            {"id": 1, "strength": 4},
-            {"id": 2, "strength": 3}
-        ]
+        fixtures = [{"team_h": 1, "team_a": 2}]  # Fixture doesn't include team 10
+        teams = [{"id": 1, "strength": 4}, {"id": 2, "strength": 3}]
 
         opponent_strength, is_home = get_opponent_info(
             player_team_id=10, fixtures=fixtures, teams=teams
@@ -195,7 +180,7 @@ class TestEngineerFeatures:
                     "element_type": 3,
                     "form": "8.5",
                     "chance_of_playing_next_round": 100,
-                    "minutes": 900
+                    "minutes": 900,
                 },
                 {
                     "id": 328,
@@ -204,22 +189,22 @@ class TestEngineerFeatures:
                     "element_type": 4,
                     "form": "7.2",
                     "chance_of_playing_next_round": 75,
-                    "minutes": 810
-                }
+                    "minutes": 810,
+                },
             ],
             "teams": [
                 {"id": 1, "name": "Arsenal", "strength": 4},
                 {"id": 10, "name": "Liverpool", "strength": 5},
-                {"id": 11, "name": "Man City", "strength": 5}
-            ]
+                {"id": 11, "name": "Man City", "strength": 5},
+            ],
         }
 
     @pytest.fixture
     def sample_fixtures(self):
         """Sample fixtures data."""
         return [
-            {"team_h": 10, "team_a": 1},   # Liverpool vs Arsenal (home)
-            {"team_h": 2, "team_a": 11}    # Someone vs Man City (away)
+            {"team_h": 10, "team_a": 1},  # Liverpool vs Arsenal (home)
+            {"team_h": 2, "team_a": 11},  # Someone vs Man City (away)
         ]
 
     @pytest.fixture
@@ -229,7 +214,7 @@ class TestEngineerFeatures:
             350: [
                 {"total_points": 8, "minutes": 90, "round": 18},
                 {"total_points": 12, "minutes": 90, "round": 19},
-                {"total_points": 6, "minutes": 90, "round": 20}
+                {"total_points": 6, "minutes": 90, "round": 20},
             ]
         }
 
@@ -242,7 +227,7 @@ class TestEngineerFeatures:
             fixtures=sample_fixtures,
             player_histories=sample_histories,
             mode="historical",
-            gameweek=20
+            gameweek=20,
         )
 
         assert len(df) == 2  # 2 players
@@ -265,7 +250,7 @@ class TestEngineerFeatures:
             fixtures=sample_fixtures,
             player_histories=sample_histories,
             mode="prediction",
-            gameweek=20
+            gameweek=20,
         )
 
         assert len(df) == 2
@@ -280,7 +265,7 @@ class TestEngineerFeatures:
             fixtures=sample_fixtures,
             player_histories={},  # Empty histories
             mode="prediction",
-            gameweek=10
+            gameweek=10,
         )
 
         # Should use form field as fallback
@@ -298,7 +283,7 @@ class TestEngineerFeatures:
             fixtures=sample_fixtures,
             player_histories={},
             mode="prediction",
-            gameweek=10
+            gameweek=10,
         )
 
         salah = df[df["player_id"] == 350].iloc[0]
@@ -310,18 +295,18 @@ class TestEngineerFeatures:
 class TestFeatureProcessorHandler:
     """Tests for feature processor Lambda handler."""
 
-    @patch('lambdas.feature_processor.handler.get_s3_client')
-    @patch('lambdas.feature_processor.handler.load_bootstrap_from_s3')
-    @patch('lambdas.feature_processor.handler.load_fixtures_from_s3')
-    @patch('lambdas.feature_processor.handler.load_player_histories_from_s3')
-    @patch('lambdas.feature_processor.handler.save_features_to_s3')
+    @patch("lambdas.feature_processor.handler.get_s3_client")
+    @patch("lambdas.feature_processor.handler.load_bootstrap_from_s3")
+    @patch("lambdas.feature_processor.handler.load_fixtures_from_s3")
+    @patch("lambdas.feature_processor.handler.load_player_histories_from_s3")
+    @patch("lambdas.feature_processor.handler.save_features_to_s3")
     def test_handler_returns_correct_structure(
         self,
         mock_save,
         mock_load_histories,
         mock_load_fixtures,
         mock_load_bootstrap,
-        mock_get_s3
+        mock_get_s3,
     ):
         """Test handler returns correct response structure."""
         # Setup mocks
@@ -330,20 +315,25 @@ class TestFeatureProcessorHandler:
 
         mock_load_bootstrap.return_value = {
             "elements": [
-                {"id": 1, "web_name": "Player", "team": 1, "element_type": 3,
-                 "form": "5.0", "chance_of_playing_next_round": 100, "minutes": 900}
+                {
+                    "id": 1,
+                    "web_name": "Player",
+                    "team": 1,
+                    "element_type": 3,
+                    "form": "5.0",
+                    "chance_of_playing_next_round": 100,
+                    "minutes": 900,
+                }
             ],
-            "teams": [{"id": 1, "strength": 3}]
+            "teams": [{"id": 1, "strength": 3}],
         }
         mock_load_fixtures.return_value = [{"team_h": 1, "team_a": 2}]
         mock_load_histories.return_value = {}
-        mock_save.return_value = "processed/season_2024_25/gw20_features_training.parquet"
+        mock_save.return_value = (
+            "processed/season_2024_25/gw20_features_training.parquet"
+        )
 
-        event = {
-            "gameweek": 20,
-            "season": "2024_25",
-            "mode": "historical"
-        }
+        event = {"gameweek": 20, "season": "2024_25", "mode": "historical"}
 
         result = handler(event, None)
 
@@ -373,18 +363,14 @@ class TestFeatureProcessorHandler:
 
     def test_handler_invalid_mode(self):
         """Test handler returns error for invalid mode."""
-        event = {
-            "gameweek": 20,
-            "season": "2024_25",
-            "mode": "invalid_mode"
-        }
+        event = {"gameweek": 20, "season": "2024_25", "mode": "invalid_mode"}
         result = handler(event, None)
 
         assert result["statusCode"] == 400
         assert "Invalid mode" in result["error"]
 
-    @patch('lambdas.feature_processor.handler.get_s3_client')
-    @patch('lambdas.feature_processor.handler.load_bootstrap_from_s3')
+    @patch("lambdas.feature_processor.handler.get_s3_client")
+    @patch("lambdas.feature_processor.handler.load_bootstrap_from_s3")
     def test_handler_s3_not_found_error(self, mock_load_bootstrap, mock_get_s3):
         """Test handler handles missing S3 data gracefully."""
         mock_s3 = Mock()
@@ -392,15 +378,12 @@ class TestFeatureProcessorHandler:
 
         # Simulate S3 NoSuchKey error
         from botocore.exceptions import ClientError
+
         mock_load_bootstrap.side_effect = ClientError(
-            {"Error": {"Code": "NoSuchKey", "Message": "Not found"}},
-            "GetObject"
+            {"Error": {"Code": "NoSuchKey", "Message": "Not found"}}, "GetObject"
         )
 
-        event = {
-            "gameweek": 20,
-            "season": "2024_25"
-        }
+        event = {"gameweek": 20, "season": "2024_25"}
 
         result = handler(event, None)
 

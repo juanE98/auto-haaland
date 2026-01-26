@@ -4,6 +4,7 @@ FPL API client with rate limiting and error handling.
 The official FPL API is free and requires no authentication.
 Rate limits are generous, but we implement exponential backoff to be respectful.
 """
+
 import time
 import logging
 from typing import Dict, Any, Optional
@@ -17,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 class FPLApiError(Exception):
     """Base exception for FPL API errors."""
+
     pass
 
 
@@ -31,10 +33,7 @@ class FPLApiClient:
     BASE_URL = "https://fantasy.premierleague.com/api"
 
     def __init__(
-        self,
-        timeout: int = 30,
-        max_retries: int = 3,
-        base_delay: float = 1.0
+        self, timeout: int = 30, max_retries: int = 3, base_delay: float = 1.0
     ):
         """
         Initialize FPL API client.
@@ -50,9 +49,7 @@ class FPLApiClient:
         self.client = httpx.Client(timeout=timeout)
 
     def _make_request(
-        self,
-        endpoint: str,
-        params: Optional[Dict[str, Any]] = None
+        self, endpoint: str, params: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         Make HTTP request with exponential backoff retry logic.
@@ -71,14 +68,20 @@ class FPLApiClient:
 
         for attempt in range(self.max_retries):
             try:
-                logger.info(f"Fetching {url} (attempt {attempt + 1}/{self.max_retries})")
+                logger.info(
+                    f"Fetching {url} (attempt {attempt + 1}/{self.max_retries})"
+                )
 
                 response = self.client.get(url, params=params)
 
                 # Handle rate limiting
                 if response.status_code == 429:
-                    retry_after = int(response.headers.get("Retry-After", self.base_delay))
-                    logger.warning(f"Rate limited. Waiting {retry_after}s before retry...")
+                    retry_after = int(
+                        response.headers.get("Retry-After", self.base_delay)
+                    )
+                    logger.warning(
+                        f"Rate limited. Waiting {retry_after}s before retry..."
+                    )
                     time.sleep(retry_after)
                     continue
 
@@ -94,7 +97,7 @@ class FPLApiClient:
                     raise FPLApiError(f"Failed to fetch {url}: {e}")
 
                 # Exponential backoff
-                delay = self.base_delay * (2 ** attempt)
+                delay = self.base_delay * (2**attempt)
                 logger.info(f"Retrying in {delay}s...")
                 time.sleep(delay)
 
@@ -103,7 +106,7 @@ class FPLApiClient:
                 if attempt == self.max_retries - 1:
                     raise FPLApiError(f"Failed to fetch {url}: {e}")
 
-                delay = self.base_delay * (2 ** attempt)
+                delay = self.base_delay * (2**attempt)
                 time.sleep(delay)
 
         raise FPLApiError(f"Failed to fetch {url} after {self.max_retries} attempts")

@@ -103,7 +103,9 @@ class TestFeatureProcessorS3Integration:
                 {"total_points": 12, "minutes": 90, "round": 19},
             ]
         }
-        haaland_history = {"history": [{"total_points": 15, "minutes": 90, "round": 18}]}
+        haaland_history = {
+            "history": [{"total_points": 15, "minutes": 90, "round": 18}]
+        }
 
         s3_client.put_object(
             Bucket=bucket,

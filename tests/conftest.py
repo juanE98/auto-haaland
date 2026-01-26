@@ -1,6 +1,7 @@
 """
 Shared pytest fixtures for Auto-Haaland FPL ML System tests.
 """
+
 import os
 import pytest
 import boto3
@@ -8,6 +9,7 @@ from moto import mock_aws
 
 
 # === Environment Setup ===
+
 
 @pytest.fixture(scope="session", autouse=True)
 def aws_credentials():
@@ -21,6 +23,7 @@ def aws_credentials():
 
 # === S3 Fixtures ===
 
+
 @pytest.fixture
 def s3_client(aws_credentials):
     """Create a mocked S3 client with the fpl-ml-data bucket."""
@@ -28,7 +31,7 @@ def s3_client(aws_credentials):
         client = boto3.client("s3", region_name="ap-southeast-2")
         client.create_bucket(
             Bucket="fpl-ml-data",
-            CreateBucketConfiguration={"LocationConstraint": "ap-southeast-2"}
+            CreateBucketConfiguration={"LocationConstraint": "ap-southeast-2"},
         )
         yield client
 
@@ -40,12 +43,13 @@ def s3_resource(aws_credentials):
         resource = boto3.resource("s3", region_name="ap-southeast-2")
         bucket = resource.create_bucket(
             Bucket="fpl-ml-data",
-            CreateBucketConfiguration={"LocationConstraint": "ap-southeast-2"}
+            CreateBucketConfiguration={"LocationConstraint": "ap-southeast-2"},
         )
         yield resource
 
 
 # === Lambda Context Fixture ===
+
 
 class MockLambdaContext:
     """Mock AWS Lambda context for testing."""
@@ -64,6 +68,7 @@ def lambda_context():
 
 # === DynamoDB Fixtures ===
 
+
 @pytest.fixture
 def dynamodb_client(aws_credentials):
     """Create a mocked DynamoDB client."""
@@ -81,50 +86,48 @@ def dynamodb_table(aws_credentials):
             TableName="fpl-predictions",
             KeySchema=[
                 {"AttributeName": "player_id", "KeyType": "HASH"},
-                {"AttributeName": "gameweek", "KeyType": "RANGE"}
+                {"AttributeName": "gameweek", "KeyType": "RANGE"},
             ],
             AttributeDefinitions=[
                 {"AttributeName": "player_id", "AttributeType": "N"},
                 {"AttributeName": "gameweek", "AttributeType": "N"},
                 {"AttributeName": "predicted_points", "AttributeType": "N"},
-                {"AttributeName": "position", "AttributeType": "S"}
+                {"AttributeName": "position", "AttributeType": "S"},
             ],
             GlobalSecondaryIndexes=[
                 {
                     "IndexName": "gameweek-points-index",
                     "KeySchema": [
                         {"AttributeName": "gameweek", "KeyType": "HASH"},
-                        {"AttributeName": "predicted_points", "KeyType": "RANGE"}
+                        {"AttributeName": "predicted_points", "KeyType": "RANGE"},
                     ],
                     "Projection": {"ProjectionType": "ALL"},
                     "ProvisionedThroughput": {
                         "ReadCapacityUnits": 5,
-                        "WriteCapacityUnits": 5
-                    }
+                        "WriteCapacityUnits": 5,
+                    },
                 },
                 {
                     "IndexName": "position-points-index",
                     "KeySchema": [
                         {"AttributeName": "position", "KeyType": "HASH"},
-                        {"AttributeName": "predicted_points", "KeyType": "RANGE"}
+                        {"AttributeName": "predicted_points", "KeyType": "RANGE"},
                     ],
                     "Projection": {"ProjectionType": "ALL"},
                     "ProvisionedThroughput": {
                         "ReadCapacityUnits": 5,
-                        "WriteCapacityUnits": 5
-                    }
-                }
+                        "WriteCapacityUnits": 5,
+                    },
+                },
             ],
             BillingMode="PROVISIONED",
-            ProvisionedThroughput={
-                "ReadCapacityUnits": 5,
-                "WriteCapacityUnits": 5
-            }
+            ProvisionedThroughput={"ReadCapacityUnits": 5, "WriteCapacityUnits": 5},
         )
         yield table
 
 
 # === Sample Data Fixtures ===
+
 
 @pytest.fixture
 def sample_fpl_bootstrap_data():
@@ -135,17 +138,10 @@ def sample_fpl_bootstrap_data():
                 "id": 1,
                 "name": "Gameweek 1",
                 "deadline_time": "2024-08-16T17:30:00Z",
-                "finished": True
+                "finished": True,
             }
         ],
-        "teams": [
-            {
-                "id": 1,
-                "name": "Arsenal",
-                "short_name": "ARS",
-                "strength": 4
-            }
-        ],
+        "teams": [{"id": 1, "name": "Arsenal", "short_name": "ARS", "strength": 4}],
         "elements": [
             {
                 "id": 350,
@@ -159,9 +155,9 @@ def sample_fpl_bootstrap_data():
                 "points_per_game": "7.2",
                 "selected_by_percent": "45.3",
                 "chance_of_playing_next_round": 100,
-                "minutes": 90
+                "minutes": 90,
             }
-        ]
+        ],
     }
 
 
@@ -179,7 +175,7 @@ def sample_player_history():
             "minutes": 90,
             "goals_scored": 1,
             "assists": 1,
-            "clean_sheets": 0
+            "clean_sheets": 0,
         },
         {
             "element": 350,
@@ -191,8 +187,8 @@ def sample_player_history():
             "minutes": 90,
             "goals_scored": 2,
             "assists": 0,
-            "clean_sheets": 0
-        }
+            "clean_sheets": 0,
+        },
     ]
 
 
@@ -200,15 +196,18 @@ def sample_player_history():
 def sample_features_dataframe():
     """Sample engineered features DataFrame."""
     import pandas as pd
-    return pd.DataFrame({
-        "player_id": [350, 328, 233],
-        "gameweek": [20, 20, 20],
-        "points_last_3": [7.3, 5.2, 8.0],
-        "points_last_5": [6.8, 4.9, 7.5],
-        "minutes_pct": [0.95, 0.88, 1.0],
-        "form_score": [8.5, 5.8, 7.9],
-        "opponent_strength": [3, 4, 2],
-        "home_away": [1, 0, 1],
-        "chance_of_playing": [100, 75, 100],
-        "form_x_difficulty": [25.5, 23.2, 15.8]
-    })
+
+    return pd.DataFrame(
+        {
+            "player_id": [350, 328, 233],
+            "gameweek": [20, 20, 20],
+            "points_last_3": [7.3, 5.2, 8.0],
+            "points_last_5": [6.8, 4.9, 7.5],
+            "minutes_pct": [0.95, 0.88, 1.0],
+            "form_score": [8.5, 5.8, 7.9],
+            "opponent_strength": [3, 4, 2],
+            "home_away": [1, 0, 1],
+            "chance_of_playing": [100, 75, 100],
+            "form_x_difficulty": [25.5, 23.2, 15.8],
+        }
+    )

@@ -48,38 +48,46 @@ class TestValidatePredictions:
 
     def test_valid_dataframe_passes(self):
         """Verify valid DataFrame passes validation."""
-        df = pd.DataFrame({
-            "player_id": [350, 328],
-            "gameweek": [20, 20],
-            "predicted_points": [8.5, 12.3],
-        })
+        df = pd.DataFrame(
+            {
+                "player_id": [350, 328],
+                "gameweek": [20, 20],
+                "predicted_points": [8.5, 12.3],
+            }
+        )
         # Should not raise
         validate_predictions(df)
 
     def test_missing_player_id_raises(self):
         """Verify missing player_id raises ValueError."""
-        df = pd.DataFrame({
-            "gameweek": [20],
-            "predicted_points": [8.5],
-        })
+        df = pd.DataFrame(
+            {
+                "gameweek": [20],
+                "predicted_points": [8.5],
+            }
+        )
         with pytest.raises(ValueError, match="Missing required columns"):
             validate_predictions(df)
 
     def test_missing_gameweek_raises(self):
         """Verify missing gameweek raises ValueError."""
-        df = pd.DataFrame({
-            "player_id": [350],
-            "predicted_points": [8.5],
-        })
+        df = pd.DataFrame(
+            {
+                "player_id": [350],
+                "predicted_points": [8.5],
+            }
+        )
         with pytest.raises(ValueError, match="Missing required columns"):
             validate_predictions(df)
 
     def test_missing_predicted_points_raises(self):
         """Verify missing predicted_points raises ValueError."""
-        df = pd.DataFrame({
-            "player_id": [350],
-            "gameweek": [20],
-        })
+        df = pd.DataFrame(
+            {
+                "player_id": [350],
+                "gameweek": [20],
+            }
+        )
         with pytest.raises(ValueError, match="Missing required columns"):
             validate_predictions(df)
 
@@ -95,12 +103,14 @@ class TestConvertToDynamoDBItem:
 
     def test_basic_conversion(self):
         """Test basic row conversion to DynamoDB item."""
-        row = pd.Series({
-            "player_id": 350,
-            "gameweek": 20,
-            "predicted_points": 8.5,
-            "position": 3,
-        })
+        row = pd.Series(
+            {
+                "player_id": 350,
+                "gameweek": 20,
+                "predicted_points": 8.5,
+                "position": 3,
+            }
+        )
 
         item = convert_to_dynamodb_item(row)
 
@@ -111,86 +121,100 @@ class TestConvertToDynamoDBItem:
 
     def test_position_string_passthrough(self):
         """Test position string is passed through."""
-        row = pd.Series({
-            "player_id": 350,
-            "gameweek": 20,
-            "predicted_points": 8.5,
-            "position": "FWD",
-        })
+        row = pd.Series(
+            {
+                "player_id": 350,
+                "gameweek": 20,
+                "predicted_points": 8.5,
+                "position": "FWD",
+            }
+        )
 
         item = convert_to_dynamodb_item(row)
         assert item["position"] == "FWD"
 
     def test_missing_position_defaults_to_unk(self):
         """Test missing position defaults to UNK."""
-        row = pd.Series({
-            "player_id": 350,
-            "gameweek": 20,
-            "predicted_points": 8.5,
-        })
+        row = pd.Series(
+            {
+                "player_id": 350,
+                "gameweek": 20,
+                "predicted_points": 8.5,
+            }
+        )
 
         item = convert_to_dynamodb_item(row)
         assert item["position"] == "UNK"
 
     def test_unknown_position_number_defaults_to_unk(self):
         """Test unknown position number defaults to UNK."""
-        row = pd.Series({
-            "player_id": 350,
-            "gameweek": 20,
-            "predicted_points": 8.5,
-            "position": 99,
-        })
+        row = pd.Series(
+            {
+                "player_id": 350,
+                "gameweek": 20,
+                "predicted_points": 8.5,
+                "position": 99,
+            }
+        )
 
         item = convert_to_dynamodb_item(row)
         assert item["position"] == "UNK"
 
     def test_optional_player_name_included(self):
         """Test optional player_name is included when present."""
-        row = pd.Series({
-            "player_id": 350,
-            "gameweek": 20,
-            "predicted_points": 8.5,
-            "position": 3,
-            "player_name": "Salah",
-        })
+        row = pd.Series(
+            {
+                "player_id": 350,
+                "gameweek": 20,
+                "predicted_points": 8.5,
+                "position": 3,
+                "player_name": "Salah",
+            }
+        )
 
         item = convert_to_dynamodb_item(row)
         assert item["player_name"] == "Salah"
 
     def test_optional_team_id_included(self):
         """Test optional team_id is included when present."""
-        row = pd.Series({
-            "player_id": 350,
-            "gameweek": 20,
-            "predicted_points": 8.5,
-            "position": 3,
-            "team_id": 10,
-        })
+        row = pd.Series(
+            {
+                "player_id": 350,
+                "gameweek": 20,
+                "predicted_points": 8.5,
+                "position": 3,
+                "team_id": 10,
+            }
+        )
 
         item = convert_to_dynamodb_item(row)
         assert item["team_id"] == 10
 
     def test_optional_season_included(self):
         """Test optional season is included when present."""
-        row = pd.Series({
-            "player_id": 350,
-            "gameweek": 20,
-            "predicted_points": 8.5,
-            "position": 3,
-            "season": "2024_25",
-        })
+        row = pd.Series(
+            {
+                "player_id": 350,
+                "gameweek": 20,
+                "predicted_points": 8.5,
+                "position": 3,
+                "season": "2024_25",
+            }
+        )
 
         item = convert_to_dynamodb_item(row)
         assert item["season"] == "2024_25"
 
     def test_predicted_points_rounded_to_two_decimals(self):
         """Test predicted_points is rounded to 2 decimal places."""
-        row = pd.Series({
-            "player_id": 350,
-            "gameweek": 20,
-            "predicted_points": 8.54321,
-            "position": 3,
-        })
+        row = pd.Series(
+            {
+                "player_id": 350,
+                "gameweek": 20,
+                "predicted_points": 8.54321,
+                "position": 3,
+            }
+        )
 
         item = convert_to_dynamodb_item(row)
         assert item["predicted_points"] == Decimal("8.54")
@@ -199,14 +223,16 @@ class TestConvertToDynamoDBItem:
         """Test NaN optional fields are excluded."""
         import numpy as np
 
-        row = pd.Series({
-            "player_id": 350,
-            "gameweek": 20,
-            "predicted_points": 8.5,
-            "position": 3,
-            "player_name": np.nan,
-            "team_id": np.nan,
-        })
+        row = pd.Series(
+            {
+                "player_id": 350,
+                "gameweek": 20,
+                "predicted_points": 8.5,
+                "position": 3,
+                "player_name": np.nan,
+                "team_id": np.nan,
+            }
+        )
 
         item = convert_to_dynamodb_item(row)
         assert "player_name" not in item
@@ -271,11 +297,13 @@ class TestLoadPredictionsFromS3:
     def test_loads_parquet_from_s3(self):
         """Test loading Parquet file from S3."""
         # Create sample predictions DataFrame
-        df = pd.DataFrame({
-            "player_id": [350, 328],
-            "gameweek": [20, 20],
-            "predicted_points": [8.5, 12.3],
-        })
+        df = pd.DataFrame(
+            {
+                "player_id": [350, 328],
+                "gameweek": [20, 20],
+                "predicted_points": [8.5, 12.3],
+            }
+        )
 
         # Mock S3 response
         buffer = io.BytesIO()
@@ -333,12 +361,14 @@ class TestHandler:
     ):
         """Test successful prediction loading."""
         # Setup mocks
-        mock_load.return_value = pd.DataFrame({
-            "player_id": [350, 328],
-            "gameweek": [20, 20],
-            "predicted_points": [8.5, 12.3],
-            "position": [3, 4],
-        })
+        mock_load.return_value = pd.DataFrame(
+            {
+                "player_id": [350, 328],
+                "gameweek": [20, 20],
+                "predicted_points": [8.5, 12.3],
+                "position": [3, 4],
+            }
+        )
         mock_delete.return_value = 0
         mock_batch_write.return_value = {"items_written": 2, "batches": 1}
 
@@ -365,11 +395,13 @@ class TestHandler:
     ):
         """Test validation error returns 400."""
         # Return DataFrame missing required column
-        mock_load.return_value = pd.DataFrame({
-            "player_id": [350],
-            "gameweek": [20],
-            # Missing predicted_points
-        })
+        mock_load.return_value = pd.DataFrame(
+            {
+                "player_id": [350],
+                "gameweek": [20],
+                # Missing predicted_points
+            }
+        )
 
         event = {"gameweek": 20, "season": "2024_25"}
 
@@ -392,11 +424,13 @@ class TestHandler:
         mock_s3,
     ):
         """Test replace_existing=True calls delete."""
-        mock_load.return_value = pd.DataFrame({
-            "player_id": [350],
-            "gameweek": [20],
-            "predicted_points": [8.5],
-        })
+        mock_load.return_value = pd.DataFrame(
+            {
+                "player_id": [350],
+                "gameweek": [20],
+                "predicted_points": [8.5],
+            }
+        )
         mock_delete.return_value = 5
         mock_batch_write.return_value = {"items_written": 1, "batches": 1}
 
@@ -425,11 +459,13 @@ class TestHandler:
         mock_s3,
     ):
         """Test replace_existing=False skips delete."""
-        mock_load.return_value = pd.DataFrame({
-            "player_id": [350],
-            "gameweek": [20],
-            "predicted_points": [8.5],
-        })
+        mock_load.return_value = pd.DataFrame(
+            {
+                "player_id": [350],
+                "gameweek": [20],
+                "predicted_points": [8.5],
+            }
+        )
         mock_batch_write.return_value = {"items_written": 1, "batches": 1}
 
         mock_table = MagicMock()
@@ -457,11 +493,13 @@ class TestHandler:
         mock_s3,
     ):
         """Test custom predictions_key is used."""
-        mock_load.return_value = pd.DataFrame({
-            "player_id": [350],
-            "gameweek": [20],
-            "predicted_points": [8.5],
-        })
+        mock_load.return_value = pd.DataFrame(
+            {
+                "player_id": [350],
+                "gameweek": [20],
+                "predicted_points": [8.5],
+            }
+        )
         mock_delete.return_value = 0
         mock_batch_write.return_value = {"items_written": 1, "batches": 1}
 
@@ -494,11 +532,13 @@ class TestHandler:
         mock_s3,
     ):
         """Test default predictions_key format."""
-        mock_load.return_value = pd.DataFrame({
-            "player_id": [350],
-            "gameweek": [20],
-            "predicted_points": [8.5],
-        })
+        mock_load.return_value = pd.DataFrame(
+            {
+                "player_id": [350],
+                "gameweek": [20],
+                "predicted_points": [8.5],
+            }
+        )
         mock_delete.return_value = 0
         mock_batch_write.return_value = {"items_written": 1, "batches": 1}
 

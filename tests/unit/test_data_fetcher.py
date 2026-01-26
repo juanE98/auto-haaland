@@ -1,6 +1,7 @@
 """
 Unit tests for data_fetcher Lambda handler.
 """
+
 import json
 import pytest
 from unittest.mock import Mock, patch, MagicMock, call
@@ -11,13 +12,9 @@ from lambdas.data_fetcher.handler import handler, save_to_s3
 class TestDataFetcherHandler:
     """Tests for data_fetcher Lambda handler."""
 
-    @patch('lambdas.data_fetcher.handler.get_s3_client')
-    @patch('lambdas.data_fetcher.handler.FPLApiClient')
-    def test_handler_with_explicit_gameweek(
-        self,
-        mock_fpl_class,
-        mock_get_s3
-    ):
+    @patch("lambdas.data_fetcher.handler.get_s3_client")
+    @patch("lambdas.data_fetcher.handler.FPLApiClient")
+    def test_handler_with_explicit_gameweek(self, mock_fpl_class, mock_get_s3):
         """Test handler with explicit gameweek in event."""
         # Mock S3 client
         mock_s3 = Mock()
@@ -26,20 +23,14 @@ class TestDataFetcherHandler:
         # Mock FPL client
         mock_fpl = MagicMock()
         mock_fpl.get_season_string.return_value = "2024_25"
-        mock_fpl.get_bootstrap_static.return_value = {
-            "events": [],
-            "elements": []
-        }
+        mock_fpl.get_bootstrap_static.return_value = {"events": [], "elements": []}
         mock_fpl.get_fixtures.return_value = [{"id": 1}]
         mock_fpl.__enter__.return_value = mock_fpl
         mock_fpl.__exit__.return_value = None
         mock_fpl_class.return_value = mock_fpl
 
         # Test event
-        event = {
-            "gameweek": 20,
-            "fetch_player_details": False
-        }
+        event = {"gameweek": 20, "fetch_player_details": False}
 
         # Invoke handler
         result = handler(event, None)
@@ -62,13 +53,9 @@ class TestDataFetcherHandler:
         fixtures_call = mock_s3.put_object.call_args_list[1]
         assert fixtures_call[1]["Key"] == "raw/season_2024_25/gw20_fixtures.json"
 
-    @patch('lambdas.data_fetcher.handler.get_s3_client')
-    @patch('lambdas.data_fetcher.handler.FPLApiClient')
-    def test_handler_auto_detect_gameweek(
-        self,
-        mock_fpl_class,
-        mock_get_s3
-    ):
+    @patch("lambdas.data_fetcher.handler.get_s3_client")
+    @patch("lambdas.data_fetcher.handler.FPLApiClient")
+    def test_handler_auto_detect_gameweek(self, mock_fpl_class, mock_get_s3):
         """Test handler auto-detects current gameweek if not provided."""
         # Mock S3 client
         mock_s3 = Mock()
@@ -95,13 +82,9 @@ class TestDataFetcherHandler:
         assert result["gameweek"] == 22
         mock_fpl.get_current_gameweek.assert_called_once()
 
-    @patch('lambdas.data_fetcher.handler.get_s3_client')
-    @patch('lambdas.data_fetcher.handler.FPLApiClient')
-    def test_handler_with_player_details(
-        self,
-        mock_fpl_class,
-        mock_get_s3
-    ):
+    @patch("lambdas.data_fetcher.handler.get_s3_client")
+    @patch("lambdas.data_fetcher.handler.FPLApiClient")
+    def test_handler_with_player_details(self, mock_fpl_class, mock_get_s3):
         """Test handler fetches individual player details when requested."""
         # Mock S3 client
         mock_s3 = Mock()
@@ -114,8 +97,8 @@ class TestDataFetcherHandler:
             "events": [],
             "elements": [
                 {"id": 350, "web_name": "Salah"},
-                {"id": 328, "web_name": "Haaland"}
-            ]
+                {"id": 328, "web_name": "Haaland"},
+            ],
         }
         mock_fpl.get_fixtures.return_value = []
         mock_fpl.get_player_summary.return_value = {"history": []}
@@ -124,10 +107,7 @@ class TestDataFetcherHandler:
         mock_fpl_class.return_value = mock_fpl
 
         # Test event
-        event = {
-            "gameweek": 20,
-            "fetch_player_details": True
-        }
+        event = {"gameweek": 20, "fetch_player_details": True}
 
         # Invoke handler
         result = handler(event, None)
@@ -142,8 +122,8 @@ class TestDataFetcherHandler:
         mock_fpl.get_player_summary.assert_any_call(350)
         mock_fpl.get_player_summary.assert_any_call(328)
 
-    @patch('lambdas.data_fetcher.handler.get_s3_client')
-    @patch('lambdas.data_fetcher.handler.FPLApiClient')
+    @patch("lambdas.data_fetcher.handler.get_s3_client")
+    @patch("lambdas.data_fetcher.handler.FPLApiClient")
     def test_handler_fpl_api_error(self, mock_fpl_class, mock_get_s3):
         """Test handler handles FPL API errors gracefully."""
         from lambdas.common.fpl_api import FPLApiError
@@ -170,8 +150,8 @@ class TestDataFetcherHandler:
         assert "error" in result
         assert "FPL API error" in result["error"]
 
-    @patch('lambdas.data_fetcher.handler.get_s3_client')
-    @patch('lambdas.data_fetcher.handler.FPLApiClient')
+    @patch("lambdas.data_fetcher.handler.get_s3_client")
+    @patch("lambdas.data_fetcher.handler.FPLApiClient")
     def test_handler_no_current_gameweek(self, mock_fpl_class, mock_get_s3):
         """Test handler when current gameweek cannot be determined."""
         # Mock S3 client
@@ -210,10 +190,7 @@ class TestSaveToS3:
 
         # Call function
         save_to_s3(
-            s3_client=mock_s3,
-            bucket="test-bucket",
-            key="test/key.json",
-            data=test_data
+            s3_client=mock_s3, bucket="test-bucket", key="test/key.json", data=test_data
         )
 
         # Assertions
@@ -233,18 +210,12 @@ class TestSaveToS3:
         mock_s3 = Mock()
 
         nested_data = {
-            "events": [
-                {"id": 1, "name": "GW1"},
-                {"id": 2, "name": "GW2"}
-            ],
-            "metadata": {"season": "2024_25"}
+            "events": [{"id": 1, "name": "GW1"}, {"id": 2, "name": "GW2"}],
+            "metadata": {"season": "2024_25"},
         }
 
         save_to_s3(
-            s3_client=mock_s3,
-            bucket="test-bucket",
-            key="nested.json",
-            data=nested_data
+            s3_client=mock_s3, bucket="test-bucket", key="nested.json", data=nested_data
         )
 
         # Verify structure is preserved

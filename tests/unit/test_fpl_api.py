@@ -1,6 +1,7 @@
 """
 Unit tests for FPL API client.
 """
+
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 import httpx
@@ -20,7 +21,7 @@ class TestFPLApiClient:
         assert client.base_delay == 2.0
         assert client.BASE_URL == "https://fantasy.premierleague.com/api"
 
-    @patch('lambdas.common.fpl_api.httpx.Client')
+    @patch("lambdas.common.fpl_api.httpx.Client")
     def test_get_bootstrap_static_success(self, mock_client_class):
         """Test successful bootstrap-static fetch."""
         # Mock response
@@ -28,7 +29,7 @@ class TestFPLApiClient:
         mock_response.status_code = 200
         mock_response.json.return_value = {
             "events": [{"id": 1, "name": "Gameweek 1"}],
-            "elements": [{"id": 350, "web_name": "Salah"}]
+            "elements": [{"id": 350, "web_name": "Salah"}],
         }
 
         # Mock client
@@ -45,12 +46,11 @@ class TestFPLApiClient:
         assert "elements" in result
         assert result["events"][0]["name"] == "Gameweek 1"
         mock_client.get.assert_called_once_with(
-            "https://fantasy.premierleague.com/api/bootstrap-static/",
-            params=None
+            "https://fantasy.premierleague.com/api/bootstrap-static/", params=None
         )
 
-    @patch('lambdas.common.fpl_api.httpx.Client')
-    @patch('lambdas.common.fpl_api.time.sleep')  # Mock sleep to speed up tests
+    @patch("lambdas.common.fpl_api.httpx.Client")
+    @patch("lambdas.common.fpl_api.time.sleep")  # Mock sleep to speed up tests
     def test_rate_limit_retry(self, mock_sleep, mock_client_class):
         """Test that rate limiting triggers retry with backoff."""
         # First response: 429 (rate limited)
@@ -77,17 +77,15 @@ class TestFPLApiClient:
         assert mock_client.get.call_count == 2
         mock_sleep.assert_called_once_with(2)  # Should sleep for Retry-After duration
 
-    @patch('lambdas.common.fpl_api.httpx.Client')
-    @patch('lambdas.common.fpl_api.time.sleep')
+    @patch("lambdas.common.fpl_api.httpx.Client")
+    @patch("lambdas.common.fpl_api.time.sleep")
     def test_http_error_with_retries(self, mock_sleep, mock_client_class):
         """Test that HTTP errors trigger exponential backoff."""
         # Mock error responses
         error_response = Mock()
         error_response.status_code = 500
         error_response.raise_for_status.side_effect = httpx.HTTPStatusError(
-            "500 Server Error",
-            request=Mock(),
-            response=error_response
+            "500 Server Error", request=Mock(), response=error_response
         )
 
         mock_client = Mock()
@@ -106,7 +104,7 @@ class TestFPLApiClient:
         # Check exponential backoff: 1s, 2s
         assert mock_sleep.call_count == 2
 
-    @patch('lambdas.common.fpl_api.httpx.Client')
+    @patch("lambdas.common.fpl_api.httpx.Client")
     def test_get_fixtures_with_gameweek(self, mock_client_class):
         """Test fetching fixtures for specific gameweek."""
         mock_response = Mock()
@@ -127,18 +125,17 @@ class TestFPLApiClient:
         assert len(result) == 1
         assert result[0]["event"] == 20
         mock_client.get.assert_called_once_with(
-            "https://fantasy.premierleague.com/api/fixtures/",
-            params={"event": 20}
+            "https://fantasy.premierleague.com/api/fixtures/", params={"event": 20}
         )
 
-    @patch('lambdas.common.fpl_api.httpx.Client')
+    @patch("lambdas.common.fpl_api.httpx.Client")
     def test_get_player_summary(self, mock_client_class):
         """Test fetching player summary."""
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.json.return_value = {
             "history": [{"total_points": 8, "minutes": 90}],
-            "fixtures": [{"event": 21}]
+            "fixtures": [{"event": 21}],
         }
 
         mock_client = Mock()
@@ -153,11 +150,10 @@ class TestFPLApiClient:
         assert "history" in result
         assert "fixtures" in result
         mock_client.get.assert_called_once_with(
-            "https://fantasy.premierleague.com/api/element-summary/350/",
-            params=None
+            "https://fantasy.premierleague.com/api/element-summary/350/", params=None
         )
 
-    @patch('lambdas.common.fpl_api.httpx.Client')
+    @patch("lambdas.common.fpl_api.httpx.Client")
     def test_get_current_gameweek(self, mock_client_class):
         """Test getting current gameweek."""
         mock_response = Mock()
@@ -166,7 +162,7 @@ class TestFPLApiClient:
             "events": [
                 {"id": 19, "is_current": False},
                 {"id": 20, "is_current": True},
-                {"id": 21, "is_current": False}
+                {"id": 21, "is_current": False},
             ]
         }
 
@@ -181,16 +177,13 @@ class TestFPLApiClient:
         # Assertions
         assert current_gw == 20
 
-    @patch('lambdas.common.fpl_api.httpx.Client')
+    @patch("lambdas.common.fpl_api.httpx.Client")
     def test_is_gameweek_finished(self, mock_client_class):
         """Test checking if gameweek is finished."""
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.json.return_value = {
-            "events": [
-                {"id": 19, "finished": True},
-                {"id": 20, "finished": False}
-            ]
+            "events": [{"id": 19, "finished": True}, {"id": 20, "finished": False}]
         }
 
         mock_client = Mock()
@@ -203,7 +196,7 @@ class TestFPLApiClient:
         assert client.is_gameweek_finished(19) is True
         assert client.is_gameweek_finished(20) is False
 
-    @patch('lambdas.common.fpl_api.datetime')
+    @patch("lambdas.common.fpl_api.datetime")
     def test_get_season_string_august_onwards(self, mock_datetime):
         """Test season string generation for months Aug-Dec."""
         # Mock current date: August 15, 2024
@@ -214,7 +207,7 @@ class TestFPLApiClient:
 
         assert season == "2024_25"
 
-    @patch('lambdas.common.fpl_api.datetime')
+    @patch("lambdas.common.fpl_api.datetime")
     def test_get_season_string_january_july(self, mock_datetime):
         """Test season string generation for months Jan-Jul."""
         # Mock current date: January 15, 2025
@@ -229,7 +222,7 @@ class TestFPLApiClient:
         """Test client works as context manager."""
         with FPLApiClient() as client:
             assert client is not None
-            assert hasattr(client, 'client')
+            assert hasattr(client, "client")
 
         # Client should be closed after exiting context
         # (Cannot easily test this without mocking)

@@ -121,10 +121,9 @@ def get_player_prediction(player_id: str):
     except ValueError:
         raise BadRequestError("player_id must be an integer")
 
-    gameweek = (
-        app.current_event.get_query_string_value("gameweek")
-        or app.current_event.get_query_string_value("gw")
-    )
+    gameweek = app.current_event.get_query_string_value(
+        "gameweek"
+    ) or app.current_event.get_query_string_value("gw")
 
     logger.info(
         "Getting player prediction",
@@ -143,9 +142,7 @@ def get_player_prediction(player_id: str):
         item = response.get("Item")
 
         if not item:
-            raise NotFoundError(
-                f"Player {player_id} not found for gameweek {gameweek}"
-            )
+            raise NotFoundError(f"Player {player_id} not found for gameweek {gameweek}")
 
         return decimal_to_float(item)
     else:
@@ -278,9 +275,7 @@ def compare_players():
         if item:
             predictions.append(item)
 
-    predictions.sort(
-        key=lambda x: float(x.get("predicted_points", 0)), reverse=True
-    )
+    predictions.sort(key=lambda x: float(x.get("predicted_points", 0)), reverse=True)
 
     found_ids = [p["player_id"] for p in predictions]
     missing_ids = [pid for pid in player_ids if pid not in found_ids]

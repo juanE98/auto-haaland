@@ -4,6 +4,7 @@ Data Fetcher Lambda Handler
 Fetches raw data from FPL API and stores it in S3.
 This is the first step in the data pipeline.
 """
+
 import json
 import logging
 import os
@@ -24,12 +25,7 @@ BUCKET_NAME = os.getenv("BUCKET_NAME", "fpl-ml-data")
 AWS_ENDPOINT_URL = os.getenv("AWS_ENDPOINT_URL")  # For LocalStack
 
 
-def save_to_s3(
-    s3_client,
-    bucket: str,
-    key: str,
-    data: Dict[str, Any]
-) -> None:
+def save_to_s3(s3_client, bucket: str, key: str, data: Dict[str, Any]) -> None:
     """
     Save JSON data to S3.
 
@@ -45,7 +41,7 @@ def save_to_s3(
         Bucket=bucket,
         Key=key,
         Body=json.dumps(data, indent=2),
-        ContentType="application/json"
+        ContentType="application/json",
     )
 
     logger.info(f"Successfully saved to s3://{bucket}/{key}")
@@ -92,7 +88,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 if gameweek is None:
                     return {
                         "statusCode": 400,
-                        "error": "Could not determine current gameweek"
+                        "error": "Could not determine current gameweek",
                     }
                 logger.info(f"Auto-detected gameweek: {gameweek}")
 
@@ -152,24 +148,16 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 "season": season,
                 "files_saved": files_saved,
                 "files_count": len(files_saved),
-                "timestamp": datetime.utcnow().isoformat() + "Z"
+                "timestamp": datetime.utcnow().isoformat() + "Z",
             }
 
     except FPLApiError as e:
         logger.error(f"FPL API error: {e}")
-        return {
-            "statusCode": 500,
-            "error": "FPL API error",
-            "message": str(e)
-        }
+        return {"statusCode": 500, "error": "FPL API error", "message": str(e)}
 
     except Exception as e:
         logger.error(f"Unexpected error: {e}", exc_info=True)
-        return {
-            "statusCode": 500,
-            "error": "Internal error",
-            "message": str(e)
-        }
+        return {"statusCode": 500, "error": "Internal error", "message": str(e)}
 
 
 # For local testing
@@ -177,7 +165,7 @@ if __name__ == "__main__":
     # Test event
     test_event = {
         "gameweek": 20,
-        "fetch_player_details": False  # Set to True to fetch player details
+        "fetch_player_details": False,  # Set to True to fetch player details
     }
 
     # Set LocalStack endpoint for local testing

@@ -196,7 +196,9 @@ class TestDataFetcherS3Integration:
             )
 
         # List objects
-        response = s3_client.list_objects_v2(Bucket=bucket, Prefix="raw/season_2024_25/")
+        response = s3_client.list_objects_v2(
+            Bucket=bucket, Prefix="raw/season_2024_25/"
+        )
 
         # Verify
         assert response["KeyCount"] == 3

@@ -138,7 +138,7 @@ def batch_write_predictions(
     total_batches = 0
 
     for i in range(0, len(predictions), batch_size):
-        batch = predictions[i:i + batch_size]
+        batch = predictions[i : i + batch_size]
 
         with table.batch_writer() as writer:
             for item in batch:
@@ -198,7 +198,9 @@ def delete_gameweek_predictions(
     while "LastEvaluatedKey" in response:
         response = table.query(
             IndexName="gameweek-points-index",
-            KeyConditionExpression=boto3.dynamodb.conditions.Key("gameweek").eq(gameweek),
+            KeyConditionExpression=boto3.dynamodb.conditions.Key("gameweek").eq(
+                gameweek
+            ),
             ExclusiveStartKey=response["LastEvaluatedKey"],
         )
 
@@ -259,7 +261,9 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
     # Build predictions key if not provided
     if not predictions_key:
-        predictions_key = f"predictions/season_{season}/gw{gameweek}_predictions.parquet"
+        predictions_key = (
+            f"predictions/season_{season}/gw{gameweek}_predictions.parquet"
+        )
 
     try:
         # Initialize clients
@@ -300,7 +304,9 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     except ClientError as e:
         error_code = e.response.get("Error", {}).get("Code", "")
         if error_code == "NoSuchKey":
-            logger.error(f"Predictions file not found: s3://{BUCKET_NAME}/{predictions_key}")
+            logger.error(
+                f"Predictions file not found: s3://{BUCKET_NAME}/{predictions_key}"
+            )
             return {
                 "statusCode": 404,
                 "error": f"Predictions file not found: {predictions_key}",
