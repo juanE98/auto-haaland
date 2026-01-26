@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Tuple
 import pandas as pd
 from botocore.exceptions import ClientError
 
-from lambdas.common.aws_clients import get_s3_client
+from common.aws_clients import get_s3_client
 
 # Configure logging
 logger = logging.getLogger()

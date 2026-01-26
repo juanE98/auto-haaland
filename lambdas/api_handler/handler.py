@@ -25,7 +25,7 @@ from aws_lambda_powertools.utilities.typing import LambdaContext
 from boto3.dynamodb.conditions import Key
 from botocore.exceptions import ClientError
 
-from lambdas.common.aws_clients import get_dynamodb_resource
+from common.aws_clients import get_dynamodb_resource
 
 logger = Logger(service="fpl-api")
 cors_config = CORSConfig(

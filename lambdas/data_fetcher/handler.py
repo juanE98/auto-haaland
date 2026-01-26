@@ -11,8 +11,8 @@ import os
 from datetime import datetime
 from typing import Any, Dict
 
-from lambdas.common.aws_clients import get_s3_client
-from lambdas.common.fpl_api import FPLApiClient, FPLApiError
+from common.aws_clients import get_s3_client
+from common.fpl_api import FPLApiClient, FPLApiError
 
 # Configure logging
 logger = logging.getLogger()

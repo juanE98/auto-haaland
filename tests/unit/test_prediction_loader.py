@@ -324,27 +324,19 @@ class TestLoadPredictionsFromS3:
 class TestHandler:
     """Tests for Lambda handler function."""
 
-    @patch("lambdas.prediction_loader.handler.get_s3_client")
-    @patch("lambdas.prediction_loader.handler.get_dynamodb_resource")
-    def test_missing_gameweek_returns_400(self, mock_dynamodb, mock_s3):
-        """Test missing gameweek returns 400 error."""
+    def test_missing_gameweek_raises(self):
+        """Test missing gameweek raises ValueError."""
         event = {"season": "2024_25"}
 
-        result = handler(event, None)
+        with pytest.raises(ValueError, match="gameweek"):
+            handler(event, None)
 
-        assert result["statusCode"] == 400
-        assert "gameweek" in result["error"]
-
-    @patch("lambdas.prediction_loader.handler.get_s3_client")
-    @patch("lambdas.prediction_loader.handler.get_dynamodb_resource")
-    def test_missing_season_returns_400(self, mock_dynamodb, mock_s3):
-        """Test missing season returns 400 error."""
+    def test_missing_season_raises(self):
+        """Test missing season raises ValueError."""
         event = {"gameweek": 20}
 
-        result = handler(event, None)
-
-        assert result["statusCode"] == 400
-        assert "season" in result["error"]
+        with pytest.raises(ValueError, match="season"):
+            handler(event, None)
 
     @patch("lambdas.prediction_loader.handler.get_s3_client")
     @patch("lambdas.prediction_loader.handler.get_dynamodb_resource")
@@ -387,13 +379,13 @@ class TestHandler:
     @patch("lambdas.prediction_loader.handler.get_s3_client")
     @patch("lambdas.prediction_loader.handler.get_dynamodb_resource")
     @patch("lambdas.prediction_loader.handler.load_predictions_from_s3")
-    def test_validation_error_returns_400(
+    def test_validation_error_raises(
         self,
         mock_load,
         mock_dynamodb,
         mock_s3,
     ):
-        """Test validation error returns 400."""
+        """Test validation error raises ValueError."""
         # Return DataFrame missing required column
         mock_load.return_value = pd.DataFrame(
             {
@@ -403,12 +395,13 @@ class TestHandler:
             }
         )
 
+        mock_table = MagicMock()
+        mock_dynamodb.return_value.Table.return_value = mock_table
+
         event = {"gameweek": 20, "season": "2024_25"}
 
-        result = handler(event, None)
-
-        assert result["statusCode"] == 400
-        assert "Missing required columns" in result["error"]
+        with pytest.raises(ValueError, match="Missing required columns"):
+            handler(event, None)
 
     @patch("lambdas.prediction_loader.handler.get_s3_client")
     @patch("lambdas.prediction_loader.handler.get_dynamodb_resource")

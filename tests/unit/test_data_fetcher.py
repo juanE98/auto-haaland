@@ -127,7 +127,7 @@ class TestDataFetcherHandler:
     @patch("lambdas.data_fetcher.handler.FPLApiClient")
     def test_handler_fpl_api_error(self, mock_fpl_class, mock_get_s3):
         """Test handler handles FPL API errors gracefully."""
-        from lambdas.common.fpl_api import FPLApiError
+        from common.fpl_api import FPLApiError
 
         # Mock S3 client
         mock_s3 = Mock()

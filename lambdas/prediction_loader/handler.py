@@ -16,7 +16,7 @@ import boto3
 import pandas as pd
 from botocore.exceptions import ClientError
 
-from lambdas.common.aws_clients import get_dynamodb_resource, get_s3_client
+from common.aws_clients import get_dynamodb_resource, get_s3_client
 
 # Configure logging
 logger = logging.getLogger()
@@ -247,16 +247,10 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     replace_existing = event.get("replace_existing", True)
 
     if not gameweek:
-        return {
-            "statusCode": 400,
-            "error": "Missing required parameter: gameweek",
-        }
+        raise ValueError("Missing required parameter: gameweek")
 
     if not season:
-        return {
-            "statusCode": 400,
-            "error": "Missing required parameter: season",
-        }
+        raise ValueError("Missing required parameter: season")
 
     # Build predictions key if not provided
     if not predictions_key:
@@ -306,26 +300,16 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             logger.error(
                 f"Predictions file not found: s3://{BUCKET_NAME}/{predictions_key}"
             )
-            return {
-                "statusCode": 404,
-                "error": f"Predictions file not found: {predictions_key}",
-            }
+            raise FileNotFoundError(
+                f"Predictions file not found: {predictions_key}"
+            ) from e
         logger.error(f"AWS error: {e}", exc_info=True)
-        return {
-            "statusCode": 500,
-            "error": str(e),
-        }
+        raise
 
     except ValueError as e:
         logger.error(f"Validation error: {e}")
-        return {
-            "statusCode": 400,
-            "error": str(e),
-        }
+        raise
 
     except Exception as e:
         logger.error(f"Error loading predictions: {e}", exc_info=True)
-        return {
-            "statusCode": 500,
-            "error": str(e),
-        }
+        raise
