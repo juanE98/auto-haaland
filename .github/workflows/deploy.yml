@@ -78,7 +78,8 @@ jobs:
           sam deploy \
             --config-env ${{ github.event.inputs.environment || 'dev' }} \
             --no-confirm-changeset \
-            --no-fail-on-empty-changeset
+            --no-fail-on-empty-changeset \
+            --resolve-image-repos
 
       - name: Get stack outputs
         run: |

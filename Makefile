@@ -93,7 +93,7 @@ build:
 
 deploy-dev:
 	@echo "Deploying to dev environment..."
-	sam deploy --config-env dev
+	sam deploy --config-env dev --resolve-image-repos
 
 clean:
 	@echo "Cleaning build artifacts..."

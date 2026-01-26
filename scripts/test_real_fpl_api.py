@@ -8,14 +8,13 @@ Run this to verify the API wrapper is working correctly.
 Usage:
     python scripts/test_real_fpl_api.py
 """
-import json
 import sys
 from pathlib import Path
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from lambdas.common.fpl_api import FPLApiClient
+from lambdas.common.fpl_api import FPLApiClient  # noqa: E402
 
 
 def main():
@@ -91,17 +90,17 @@ def main():
         try:
             # Find Salah's ID from bootstrap
             salah = next(
-                (p for p in bootstrap['elements']
-                 if 'Salah' in p['web_name']),
-                None
+                (p for p in bootstrap["elements"] if "Salah" in p["web_name"]), None
             )
 
             if salah:
-                player_id = salah['id']
+                player_id = salah["id"]
                 print(f"✓ Found player: {salah['web_name']} (ID: {player_id})")
 
                 summary = client.get_player_summary(player_id)
-                print(f"✓ Got player history with {len(summary.get('history', []))} gameweeks")
+                print(
+                    f"✓ Got player history with {len(summary.get('history', []))} gameweeks"
+                )
                 print()
             else:
                 print("✓ Skipped (couldn't find Salah)")

@@ -28,7 +28,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # SageMaker environment paths
-SM_CHANNEL_TRAINING = os.environ.get("SM_CHANNEL_TRAINING", "/opt/ml/input/data/training")
+SM_CHANNEL_TRAINING = os.environ.get(
+    "SM_CHANNEL_TRAINING", "/opt/ml/input/data/training"
+)
 SM_MODEL_DIR = os.environ.get("SM_MODEL_DIR", "/opt/ml/model")
 SM_OUTPUT_DATA_DIR = os.environ.get("SM_OUTPUT_DATA_DIR", "/opt/ml/output/data")
 
@@ -109,8 +111,10 @@ def validate_data(df: pd.DataFrame) -> None:
 def train(args):
     """Main training function."""
     logger.info("Starting SageMaker training job")
-    logger.info(f"Hyperparameters: n_estimators={args.n_estimators}, "
-                f"max_depth={args.max_depth}, learning_rate={args.learning_rate}")
+    logger.info(
+        f"Hyperparameters: n_estimators={args.n_estimators}, "
+        f"max_depth={args.max_depth}, learning_rate={args.learning_rate}"
+    )
 
     # Load data
     df = load_training_data(args.train)
@@ -120,8 +124,10 @@ def train(args):
     y = df[TARGET_COL]
 
     logger.info(f"Features shape: {X.shape}")
-    logger.info(f"Target stats: mean={y.mean():.2f}, std={y.std():.2f}, "
-                f"min={y.min()}, max={y.max()}")
+    logger.info(
+        f"Target stats: mean={y.mean():.2f}, std={y.std():.2f}, "
+        f"min={y.min()}, max={y.max()}"
+    )
 
     # Train-test split
     X_train, X_test, y_train, y_test = train_test_split(

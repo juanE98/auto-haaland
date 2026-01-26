@@ -98,10 +98,13 @@ Resources:
 
   InferenceFunction:
     Type: AWS::Serverless::Function
+    Metadata:
+      Dockerfile: Dockerfile.inference
+      DockerContext: ./lambdas
+      DockerTag: python3.12-v1
     Properties:
       FunctionName: !Sub "fpl-inference-${Environment}"
-      CodeUri: lambdas/
-      Handler: inference.handler.handler
+      PackageType: Image
       Timeout: 300
       MemorySize: 1024
       Environment:
