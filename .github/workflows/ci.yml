@@ -111,7 +111,7 @@ jobs:
           pip install -r requirements-dev.txt
 
       - name: Run flake8
-        run: flake8 lambdas cli --max-line-length=120 --ignore=E501,W503
+        run: flake8 lambdas cli --max-line-length=120 --ignore=E501,W503,E203
 
       - name: Run black (check only)
         run: black --check lambdas cli tests
