@@ -84,7 +84,7 @@ import-historical:
 
 backfill:
 	@echo "Backfilling current season data..."
-	venv/bin/python scripts/backfill_current_season.py --output-dir data/current/
+	venv/bin/python scripts/backfill_current_season.py --output-dir data/current/ $(if $(END_GW),--end-gw $(END_GW),)
 
 train-local:
 	@echo "Training model locally..."

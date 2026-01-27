@@ -377,6 +377,12 @@ def main():
         help="S3 bucket name (default: fpl-ml-data-dev)",
     )
     parser.add_argument(
+        "--end-gw",
+        type=int,
+        default=None,
+        help="Last gameweek to include (default: all finished gameweeks)",
+    )
+    parser.add_argument(
         "--batch-size",
         type=int,
         default=BATCH_SIZE,
@@ -402,9 +408,12 @@ def main():
         # Step 2: Get finished gameweeks
         finished_gws = get_finished_gameweeks(events)
         target_gws = [gw for gw in finished_gws if gw >= args.start_gw]
+        if args.end_gw is not None:
+            target_gws = [gw for gw in target_gws if gw <= args.end_gw]
         logger.info(
             f"Finished gameweeks: {len(finished_gws)}, "
-            f"Target gameweeks (>= GW{args.start_gw}): {len(target_gws)}"
+            f"Target gameweeks (GW{args.start_gw}"
+            f"{f'-{args.end_gw}' if args.end_gw else '+'}): {len(target_gws)}"
         )
 
         if not target_gws:
