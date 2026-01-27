@@ -265,6 +265,10 @@ class TestEngineerBackfillFeatures:
             "home_away",
             "chance_of_playing",
             "form_x_difficulty",
+            "goals_last_3",
+            "assists_last_3",
+            "clean_sheets_last_3",
+            "bps_last_3",
             "actual_points",
         }
         assert set(result.columns) == expected_cols

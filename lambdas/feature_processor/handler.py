@@ -207,6 +207,14 @@ def engineer_features(
             points_last_3 = calculate_rolling_average(points_list, 3)
             points_last_5 = calculate_rolling_average(points_list, 5)
             minutes_pct = calculate_minutes_pct(history, 5)
+            goals_list = [h.get("goals_scored", 0) for h in history]
+            assists_list = [h.get("assists", 0) for h in history]
+            cs_list = [h.get("clean_sheets", 0) for h in history]
+            bps_list = [h.get("bps", 0) for h in history]
+            goals_last_3 = calculate_rolling_average(goals_list, 3)
+            assists_last_3 = calculate_rolling_average(assists_list, 3)
+            clean_sheets_last_3 = calculate_rolling_average(cs_list, 3)
+            bps_last_3 = calculate_rolling_average(bps_list, 3)
         else:
             # Fallback to bootstrap form field
             form = float(player.get("form", 0) or 0)
@@ -217,6 +225,10 @@ def engineer_features(
             # Rough estimate: minutes / (gameweek * 90)
             expected_minutes = max(gameweek * 90, 90)
             minutes_pct = min(total_minutes / expected_minutes, 1.0)
+            goals_last_3 = 0.0
+            assists_last_3 = 0.0
+            clean_sheets_last_3 = 0.0
+            bps_last_3 = 0.0
 
         # Form score from bootstrap
         form_score = float(player.get("form", 0) or 0)
@@ -246,6 +258,10 @@ def engineer_features(
             "home_away": home_away,
             "chance_of_playing": chance_of_playing,
             "form_x_difficulty": round(form_x_difficulty, 2),
+            "goals_last_3": round(goals_last_3, 2),
+            "assists_last_3": round(assists_last_3, 2),
+            "clean_sheets_last_3": round(clean_sheets_last_3, 2),
+            "bps_last_3": round(bps_last_3, 2),
         }
 
         # Add actual points for historical mode (training target)
