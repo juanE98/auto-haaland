@@ -41,33 +41,55 @@ source venv/bin/activate
 pip install -r requirements-dev.txt
 ```
 
-### Testing
+### Commands
+
+Run `make help` for all available commands. Key ones below:
 
 ```bash
-# Test with real FPL API
-source venv/bin/activate
-python scripts/test_real_fpl_api.py
+# Setup
+make setup                      # Install dev dependencies
+make install                    # Install production dependencies only
 
-# Run all tests
-make test
+# Local Infrastructure
+make local-up                   # Start LocalStack (S3, DynamoDB)
+make local-down                 # Stop LocalStack
+make local-logs                 # View LocalStack logs
+make local-api                  # Start local API with SAM CLI
 
-# Run specific test suites
-make test-unit          # Unit tests (fast)
-make test-integration   # Integration tests (with LocalStack)
+# Testing
+make test                       # Run all tests (unit + integration)
+make test-unit                  # Unit tests only (fast, no dependencies)
+make test-integration           # Integration tests (starts/stops LocalStack)
+
+# Data & Training
+make import-historical          # Import historical data from GitHub
+make backfill                   # Backfill current season from FPL API
+make backfill END_GW=22         # Backfill up to GW22 only
+make train-local                # Train XGBoost model locally
+make train-and-upload           # Train locally and upload model to S3
+
+# Pipeline
+make run-pipeline               # Trigger pipeline (auto-detect gameweek)
+make run-pipeline GW=23         # Trigger pipeline for specific gameweek
+
+# CLI Queries
+make top GW=22                  # Top 10 predicted scorers for gameweek
+make top GW=22 LIMIT=20         # Top N predicted scorers for gameweek
+make player ID=328 GW=22        # Predictions for a specific player
+make compare IDS=328,350 GW=22  # Compare players for a gameweek
+make predictions GW=22          # All predictions for a gameweek
+
+# Code Quality
+make lint                       # Run lint checks (black, isort, flake8)
+make format                     # Auto-format code (black, isort)
+
+# AWS Deployment
+make build                      # Build SAM application
+make deploy-dev                 # Deploy to dev environment
+
+# Cleanup
+make clean                      # Remove build artifacts and caches
 ```
-
-### Local Development
-
-```bash
-make local-up    # Start LocalStack (S3, DynamoDB)
-make local-down  # Stop LocalStack
-make local-logs  # View logs
-make help        # See all commands
-```
-
-LocalStack runs at:
-- S3: `http://localhost:4566`
-- DynamoDB Admin UI: `http://localhost:8001`
 
 ## Architecture
 
@@ -80,13 +102,26 @@ See [fpl-ml-aws-architecture.md](./fpl-ml-aws-architecture.md) for details.
 ```
 auto-haaland/
 ├── lambdas/
-│   ├── common/              # FPL API client, AWS utilities
-│   └── data_fetcher/        # Lambda handler for data fetching
-├── tests/
-│   ├── unit/                # 18 unit tests
-│   └── integration/         # 5 integration tests
+│   ├── common/              # Shared: FPL API client, AWS utilities, feature config
+│   ├── data_fetcher/        # Fetches bootstrap, fixtures, player histories to S3
+│   ├── feature_processor/   # Feature engineering from raw data to Parquet
+│   ├── inference/           # Loads XGBoost model, runs predictions
+│   ├── prediction_loader/   # Batch writes predictions to DynamoDB
+│   └── api_handler/         # REST API (top, player, compare, predictions)
+├── sagemaker/
+│   ├── train.py             # SageMaker training script
+│   └── train_local.py       # Local training with optional S3 upload
 ├── scripts/
-│   └── test_real_fpl_api.py # Real API verification
+│   ├── import_historical.py # Import historical data from vaastav GitHub repo
+│   └── backfill_current_season.py  # Backfill current season via FPL API
+├── cli/
+│   └── fpl.py               # CLI tool for queries, pipeline, training
+├── statemachine/
+│   └── pipeline.asl.json    # Step Functions state machine definition
+├── tests/
+│   ├── unit/                # Unit tests (moto, httpx mock)
+│   └── integration/         # Integration tests (LocalStack)
+├── template.yaml            # SAM template (Lambdas, DynamoDB, S3, API GW, Step Functions)
 ├── docker-compose.yml       # LocalStack configuration
 ├── Makefile                 # Development commands
 └── setup.sh                 # Automated setup
