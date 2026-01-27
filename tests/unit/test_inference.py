@@ -64,6 +64,10 @@ def sample_features_df():
             "home_away": [1, 0, 1],
             "chance_of_playing": [100, 75, 100],
             "form_x_difficulty": [25.5, 23.2, 15.8],
+            "goals_last_3": [0.67, 1.0, 0.33],
+            "assists_last_3": [0.33, 0.0, 0.67],
+            "clean_sheets_last_3": [0.0, 0.0, 0.33],
+            "bps_last_3": [28.0, 32.0, 25.0],
         }
     )
 

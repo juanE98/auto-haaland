@@ -44,6 +44,11 @@ FEATURE_COLS = [
     "home_away",
     "chance_of_playing",
     "form_x_difficulty",
+    "position",
+    "goals_last_3",
+    "assists_last_3",
+    "clean_sheets_last_3",
+    "bps_last_3",
 ]
 
 TARGET_COL = "actual_points"

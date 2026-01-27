@@ -42,6 +42,11 @@ FEATURE_COLS = [
     "home_away",
     "chance_of_playing",
     "form_x_difficulty",
+    "position",
+    "goals_last_3",
+    "assists_last_3",
+    "clean_sheets_last_3",
+    "bps_last_3",
 ]
 
 # Mapping from position string to numeric element_type
@@ -237,11 +242,23 @@ def engineer_historical_features(
             minutes_pct = calculate_minutes_pct(minutes_list, 5)
             # form_score: use points_last_5 as proxy (FPL form unavailable)
             form_score = points_last_5
+            goals_list = [h["goals_scored"] for h in history]
+            assists_list = [h["assists"] for h in history]
+            cs_list = [h["clean_sheets"] for h in history]
+            bps_list = [h["bps"] for h in history]
+            goals_last_3 = calculate_rolling_average(goals_list, 3)
+            assists_last_3 = calculate_rolling_average(assists_list, 3)
+            clean_sheets_last_3 = calculate_rolling_average(cs_list, 3)
+            bps_last_3 = calculate_rolling_average(bps_list, 3)
         else:
             points_last_3 = 0.0
             points_last_5 = 0.0
             minutes_pct = 0.0
             form_score = 0.0
+            goals_last_3 = 0.0
+            assists_last_3 = 0.0
+            clean_sheets_last_3 = 0.0
+            bps_last_3 = 0.0
 
         # Opponent strength from team strength map
         opponent_team = int(row.get("opponent_team", 0))
@@ -291,6 +308,10 @@ def engineer_historical_features(
             "home_away": home_away,
             "chance_of_playing": chance_of_playing,
             "form_x_difficulty": round(form_x_difficulty, 2),
+            "goals_last_3": round(goals_last_3, 2),
+            "assists_last_3": round(assists_last_3, 2),
+            "clean_sheets_last_3": round(clean_sheets_last_3, 2),
+            "bps_last_3": round(bps_last_3, 2),
             "actual_points": actual_points,
         }
 
@@ -390,6 +411,10 @@ def process_season(
                 {
                     "total_points": int(row.get("total_points", 0)),
                     "minutes": int(row.get("minutes", 0)),
+                    "goals_scored": int(row.get("goals_scored", 0)),
+                    "assists": int(row.get("assists", 0)),
+                    "clean_sheets": int(row.get("clean_sheets", 0)),
+                    "bps": int(row.get("bps", 0)),
                     "round": gw,
                 }
             )

@@ -149,9 +149,33 @@ class TestEngineerHistoricalFeatures:
 
         player_history = {
             100: [
-                {"total_points": 6, "minutes": 90, "round": 1},
-                {"total_points": 4, "minutes": 80, "round": 2},
-                {"total_points": 10, "minutes": 90, "round": 3},
+                {
+                    "total_points": 6,
+                    "minutes": 90,
+                    "round": 1,
+                    "goals_scored": 1,
+                    "assists": 0,
+                    "clean_sheets": 0,
+                    "bps": 22,
+                },
+                {
+                    "total_points": 4,
+                    "minutes": 80,
+                    "round": 2,
+                    "goals_scored": 0,
+                    "assists": 1,
+                    "clean_sheets": 0,
+                    "bps": 18,
+                },
+                {
+                    "total_points": 10,
+                    "minutes": 90,
+                    "round": 3,
+                    "goals_scored": 1,
+                    "assists": 1,
+                    "clean_sheets": 1,
+                    "bps": 35,
+                },
             ]
         }
 
@@ -284,6 +308,10 @@ class TestEngineerHistoricalFeatures:
             "home_away",
             "chance_of_playing",
             "form_x_difficulty",
+            "goals_last_3",
+            "assists_last_3",
+            "clean_sheets_last_3",
+            "bps_last_3",
             "actual_points",
         }
         assert set(result.columns) == expected_cols
@@ -307,9 +335,33 @@ class TestEngineerHistoricalFeatures:
 
         player_history = {
             100: [
-                {"total_points": 8, "minutes": 90, "round": 1},
-                {"total_points": 6, "minutes": 90, "round": 2},
-                {"total_points": 4, "minutes": 90, "round": 3},
+                {
+                    "total_points": 8,
+                    "minutes": 90,
+                    "round": 1,
+                    "goals_scored": 1,
+                    "assists": 0,
+                    "clean_sheets": 0,
+                    "bps": 28,
+                },
+                {
+                    "total_points": 6,
+                    "minutes": 90,
+                    "round": 2,
+                    "goals_scored": 0,
+                    "assists": 1,
+                    "clean_sheets": 0,
+                    "bps": 22,
+                },
+                {
+                    "total_points": 4,
+                    "minutes": 90,
+                    "round": 3,
+                    "goals_scored": 0,
+                    "assists": 0,
+                    "clean_sheets": 1,
+                    "bps": 18,
+                },
             ]
         }
 

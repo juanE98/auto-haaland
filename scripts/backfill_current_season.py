@@ -41,6 +41,11 @@ FEATURE_COLS = [
     "home_away",
     "chance_of_playing",
     "form_x_difficulty",
+    "position",
+    "goals_last_3",
+    "assists_last_3",
+    "clean_sheets_last_3",
+    "bps_last_3",
 ]
 
 # Batch size for player summary API calls
@@ -248,11 +253,23 @@ def engineer_backfill_features(
             points_last_5 = calculate_rolling_average(points_list, 5)
             minutes_pct = calculate_minutes_pct(prior_history, 5)
             form_score = points_last_5
+            goals_list = [h.get("goals_scored", 0) for h in prior_history]
+            assists_list = [h.get("assists", 0) for h in prior_history]
+            cs_list = [h.get("clean_sheets", 0) for h in prior_history]
+            bps_list = [h.get("bps", 0) for h in prior_history]
+            goals_last_3 = calculate_rolling_average(goals_list, 3)
+            assists_last_3 = calculate_rolling_average(assists_list, 3)
+            clean_sheets_last_3 = calculate_rolling_average(cs_list, 3)
+            bps_last_3 = calculate_rolling_average(bps_list, 3)
         else:
             points_last_3 = 0.0
             points_last_5 = 0.0
             minutes_pct = 0.0
             form_score = 0.0
+            goals_last_3 = 0.0
+            assists_last_3 = 0.0
+            clean_sheets_last_3 = 0.0
+            bps_last_3 = 0.0
 
         # Opponent info from fixtures
         opponent_strength, home_away = get_fixture_info(
@@ -279,6 +296,10 @@ def engineer_backfill_features(
             "home_away": home_away,
             "chance_of_playing": chance_of_playing,
             "form_x_difficulty": round(form_x_difficulty, 2),
+            "goals_last_3": round(goals_last_3, 2),
+            "assists_last_3": round(assists_last_3, 2),
+            "clean_sheets_last_3": round(clean_sheets_last_3, 2),
+            "bps_last_3": round(bps_last_3, 2),
             "actual_points": actual_points,
         }
 

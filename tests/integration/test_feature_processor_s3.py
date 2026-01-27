@@ -227,9 +227,33 @@ class TestFeatureProcessorS3Integration:
 
         player_history = {
             "history": [
-                {"total_points": 8, "minutes": 90, "round": 18},
-                {"total_points": 12, "minutes": 90, "round": 19},
-                {"total_points": 6, "minutes": 90, "round": 20},
+                {
+                    "total_points": 8,
+                    "minutes": 90,
+                    "round": 18,
+                    "goals_scored": 1,
+                    "assists": 0,
+                    "clean_sheets": 0,
+                    "bps": 28,
+                },
+                {
+                    "total_points": 12,
+                    "minutes": 90,
+                    "round": 19,
+                    "goals_scored": 1,
+                    "assists": 1,
+                    "clean_sheets": 0,
+                    "bps": 35,
+                },
+                {
+                    "total_points": 6,
+                    "minutes": 90,
+                    "round": 20,
+                    "goals_scored": 0,
+                    "assists": 1,
+                    "clean_sheets": 1,
+                    "bps": 22,
+                },
             ]
         }
 

@@ -30,7 +30,7 @@ class TestFeatureColumns:
 
     def test_feature_cols_count(self):
         """Verify correct number of feature columns."""
-        assert len(FEATURE_COLS) == 8
+        assert len(FEATURE_COLS) == 13
 
     def test_feature_cols_names(self):
         """Verify feature column names match expected."""
@@ -43,6 +43,11 @@ class TestFeatureColumns:
             "home_away",
             "chance_of_playing",
             "form_x_difficulty",
+            "position",
+            "goals_last_3",
+            "assists_last_3",
+            "clean_sheets_last_3",
+            "bps_last_3",
         ]
         assert FEATURE_COLS == expected
 
@@ -67,6 +72,11 @@ class TestValidateFeatures:
                 "home_away": [1, 0, 1],
                 "chance_of_playing": [100, 75, 100],
                 "form_x_difficulty": [25.5, 23.2, 15.8],
+                "position": [3, 4, 3],
+                "goals_last_3": [0.67, 1.0, 0.33],
+                "assists_last_3": [0.33, 0.0, 0.67],
+                "clean_sheets_last_3": [0.0, 0.0, 0.33],
+                "bps_last_3": [28.0, 32.0, 25.0],
                 "actual_points": [8, 4, 12],
             }
         )
@@ -179,6 +189,55 @@ class TestTrainModel:
                     22.0,
                     17.6,
                 ],
+                "position": [3, 4, 3, 3, 3, 4, 3, 4, 4, 4],
+                "goals_last_3": [
+                    0.67,
+                    1.0,
+                    0.33,
+                    0.0,
+                    0.33,
+                    1.33,
+                    0.0,
+                    0.67,
+                    0.33,
+                    0.33,
+                ],
+                "assists_last_3": [
+                    0.33,
+                    0.0,
+                    0.67,
+                    0.33,
+                    0.33,
+                    0.0,
+                    0.33,
+                    0.0,
+                    0.0,
+                    0.33,
+                ],
+                "clean_sheets_last_3": [
+                    0.0,
+                    0.0,
+                    0.33,
+                    0.33,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                ],
+                "bps_last_3": [
+                    28.0,
+                    32.0,
+                    25.0,
+                    18.0,
+                    22.0,
+                    35.0,
+                    15.0,
+                    24.0,
+                    20.0,
+                    19.0,
+                ],
                 "actual_points": [8, 4, 12, 2, 6, 15, 1, 9, 5, 11],
             }
         )
@@ -243,6 +302,55 @@ class TestEvaluateModel:
                     22.0,
                     17.6,
                 ],
+                "position": [3, 4, 3, 3, 3, 4, 3, 4, 4, 4],
+                "goals_last_3": [
+                    0.67,
+                    1.0,
+                    0.33,
+                    0.0,
+                    0.33,
+                    1.33,
+                    0.0,
+                    0.67,
+                    0.33,
+                    0.33,
+                ],
+                "assists_last_3": [
+                    0.33,
+                    0.0,
+                    0.67,
+                    0.33,
+                    0.33,
+                    0.0,
+                    0.33,
+                    0.0,
+                    0.0,
+                    0.33,
+                ],
+                "clean_sheets_last_3": [
+                    0.0,
+                    0.0,
+                    0.33,
+                    0.33,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                ],
+                "bps_last_3": [
+                    28.0,
+                    32.0,
+                    25.0,
+                    18.0,
+                    22.0,
+                    35.0,
+                    15.0,
+                    24.0,
+                    20.0,
+                    19.0,
+                ],
                 "actual_points": [8, 4, 12, 2, 6, 15, 1, 9, 5, 11],
             }
         )
@@ -299,6 +407,11 @@ class TestGetFeatureImportance:
                 "home_away": [1, 0, 1, 0, 1],
                 "chance_of_playing": [100, 75, 100, 50, 100],
                 "form_x_difficulty": [25.5, 23.2, 15.8, 20.0, 19.5],
+                "position": [3, 4, 3, 3, 3],
+                "goals_last_3": [0.67, 1.0, 0.33, 0.0, 0.33],
+                "assists_last_3": [0.33, 0.0, 0.67, 0.33, 0.33],
+                "clean_sheets_last_3": [0.0, 0.0, 0.33, 0.33, 0.0],
+                "bps_last_3": [28.0, 32.0, 25.0, 18.0, 22.0],
                 "actual_points": [8, 4, 12, 2, 6],
             }
         )
@@ -346,6 +459,11 @@ class TestSaveLoadModel:
                 "home_away": [1, 0, 1, 0, 1],
                 "chance_of_playing": [100, 75, 100, 50, 100],
                 "form_x_difficulty": [25.5, 23.2, 15.8, 20.0, 19.5],
+                "position": [3, 4, 3, 3, 3],
+                "goals_last_3": [0.67, 1.0, 0.33, 0.0, 0.33],
+                "assists_last_3": [0.33, 0.0, 0.67, 0.33, 0.33],
+                "clean_sheets_last_3": [0.0, 0.0, 0.33, 0.33, 0.0],
+                "bps_last_3": [28.0, 32.0, 25.0, 18.0, 22.0],
                 "actual_points": [8, 4, 12, 2, 6],
             }
         )
@@ -394,6 +512,11 @@ class TestSaveLoadModel:
                 "home_away": [1],
                 "chance_of_playing": [100],
                 "form_x_difficulty": [22.5],
+                "position": [3],
+                "goals_last_3": [0.5],
+                "assists_last_3": [0.33],
+                "clean_sheets_last_3": [0.0],
+                "bps_last_3": [25.0],
             }
         )
 
