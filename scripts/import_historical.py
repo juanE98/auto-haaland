@@ -15,11 +15,21 @@ import argparse
 import io
 import logging
 import os
+import sys
 import time
 from pathlib import Path
 
 import httpx
 import pandas as pd
+
+# Add project root to path for imports
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from lambdas.common.feature_config import (  # noqa: E402
+    FEATURE_COLS,
+    compute_derived_features,
+    compute_rolling_features,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -31,29 +41,6 @@ logger = logging.getLogger(__name__)
 GITHUB_RAW_BASE = (
     "https://raw.githubusercontent.com/vaastav/Fantasy-Premier-League/master/data"
 )
-
-# Feature columns matching the feature processor output
-FEATURE_COLS = [
-    "points_last_3",
-    "points_last_5",
-    "minutes_pct",
-    "form_score",
-    "opponent_strength",
-    "home_away",
-    "chance_of_playing",
-    "form_x_difficulty",
-    "position",
-    "goals_last_3",
-    "assists_last_3",
-    "clean_sheets_last_3",
-    "bps_last_3",
-    "ict_index_last_3",
-    "threat_last_3",
-    "creativity_last_3",
-    "opponent_attack_strength",
-    "opponent_defence_strength",
-    "selected_by_percent",
-]
 
 # Mapping from position string to numeric element_type
 POSITION_MAP = {"GK": 1, "DEF": 2, "MID": 3, "FWD": 4}
@@ -198,42 +185,6 @@ def build_team_name_map(teams_df: pd.DataFrame) -> dict[str, int]:
     return name_map
 
 
-def calculate_rolling_average(values: list[float], window: int) -> float:
-    """
-    Calculate rolling average over the last `window` values.
-
-    Args:
-        values: List of values (most recent last)
-        window: Number of values to average
-
-    Returns:
-        Rolling average, or average of available data if fewer values exist
-    """
-    if not values:
-        return 0.0
-    recent = values[-window:] if len(values) >= window else values
-    return sum(recent) / len(recent)
-
-
-def calculate_minutes_pct(minutes_list: list[int], window: int = 5) -> float:
-    """
-    Calculate minutes played percentage over recent games.
-
-    Args:
-        minutes_list: List of minutes played per game (most recent last)
-        window: Number of games to consider
-
-    Returns:
-        Average minutes percentage (0-1 scale)
-    """
-    if not minutes_list:
-        return 0.0
-    recent = minutes_list[-window:] if len(minutes_list) >= window else minutes_list
-    total_minutes = sum(recent)
-    max_minutes = 90 * len(recent)
-    return total_minutes / max_minutes if max_minutes > 0 else 0.0
-
-
 def engineer_historical_features(
     gw_df: pd.DataFrame,
     gameweek: int,
@@ -272,39 +223,11 @@ def engineer_historical_features(
 
         # Calculate rolling features from prior gameweeks only
         if history:
-            points_list = [h["total_points"] for h in history]
-            minutes_list = [h["minutes"] for h in history]
-            points_last_3 = calculate_rolling_average(points_list, 3)
-            points_last_5 = calculate_rolling_average(points_list, 5)
-            minutes_pct = calculate_minutes_pct(minutes_list, 5)
-            # form_score: use points_last_5 as proxy (FPL form unavailable)
-            form_score = points_last_5
-            goals_list = [h["goals_scored"] for h in history]
-            assists_list = [h["assists"] for h in history]
-            cs_list = [h["clean_sheets"] for h in history]
-            bps_list = [h["bps"] for h in history]
-            goals_last_3 = calculate_rolling_average(goals_list, 3)
-            assists_last_3 = calculate_rolling_average(assists_list, 3)
-            clean_sheets_last_3 = calculate_rolling_average(cs_list, 3)
-            bps_last_3 = calculate_rolling_average(bps_list, 3)
-            ict_list = [float(h.get("ict_index", 0) or 0) for h in history]
-            threat_list = [float(h.get("threat", 0) or 0) for h in history]
-            creativity_list = [float(h.get("creativity", 0) or 0) for h in history]
-            ict_index_last_3 = calculate_rolling_average(ict_list, 3)
-            threat_last_3 = calculate_rolling_average(threat_list, 3)
-            creativity_last_3 = calculate_rolling_average(creativity_list, 3)
+            rolling = compute_rolling_features(history)
+            form_score = rolling.get("points_last_5", 0.0)
         else:
-            points_last_3 = 0.0
-            points_last_5 = 0.0
-            minutes_pct = 0.0
+            rolling = {name: 0.0 for name in FEATURE_COLS if "_last_" in name}
             form_score = 0.0
-            goals_last_3 = 0.0
-            assists_last_3 = 0.0
-            clean_sheets_last_3 = 0.0
-            bps_last_3 = 0.0
-            ict_index_last_3 = 0.0
-            threat_last_3 = 0.0
-            creativity_last_3 = 0.0
 
         # Opponent strength from team strength map
         opponent_team = int(row.get("opponent_team", 0))
@@ -338,9 +261,6 @@ def engineer_historical_features(
         # Chance of playing: not available historically, default 100
         chance_of_playing = 100
 
-        # Interaction feature
-        form_x_difficulty = form_score * opponent_strength
-
         # Actual points (target)
         actual_points = int(row.get("total_points", 0))
 
@@ -358,32 +278,33 @@ def engineer_historical_features(
         else:
             position = int(pos_raw)
 
-        feature_row = {
-            "player_id": player_id,
-            "player_name": player_name,
-            "team_id": team_id,
-            "position": position,
-            "gameweek": gameweek,
-            "points_last_3": round(points_last_3, 2),
-            "points_last_5": round(points_last_5, 2),
-            "minutes_pct": round(minutes_pct, 3),
+        # Static features
+        static = {
             "form_score": round(form_score, 2),
             "opponent_strength": opponent_strength,
             "home_away": home_away,
             "chance_of_playing": chance_of_playing,
-            "form_x_difficulty": round(form_x_difficulty, 2),
-            "goals_last_3": round(goals_last_3, 2),
-            "assists_last_3": round(assists_last_3, 2),
-            "clean_sheets_last_3": round(clean_sheets_last_3, 2),
-            "bps_last_3": round(bps_last_3, 2),
-            "ict_index_last_3": round(ict_index_last_3, 2),
-            "threat_last_3": round(threat_last_3, 2),
-            "creativity_last_3": round(creativity_last_3, 2),
+            "position": position,
             "opponent_attack_strength": opp_attack_strength,
             "opponent_defence_strength": opp_defence_strength,
             "selected_by_percent": selected_by_percent,
-            "actual_points": actual_points,
+            "now_cost": int(row.get("value", 0) or 0),
         }
+
+        # Derived features
+        derived = compute_derived_features(history, rolling, static)
+
+        # Build feature row
+        feature_row = {
+            "player_id": player_id,
+            "player_name": player_name,
+            "team_id": team_id,
+            "gameweek": gameweek,
+        }
+        feature_row.update(rolling)
+        feature_row.update(static)
+        feature_row.update(derived)
+        feature_row["actual_points"] = actual_points
 
         features.append(feature_row)
 
@@ -494,6 +415,12 @@ def process_season(
                     "ict_index": float(row.get("ict_index", 0) or 0),
                     "threat": float(row.get("threat", 0) or 0),
                     "creativity": float(row.get("creativity", 0) or 0),
+                    "influence": float(row.get("influence", 0) or 0),
+                    "bonus": int(row.get("bonus", 0) or 0),
+                    "yellow_cards": int(row.get("yellow_cards", 0) or 0),
+                    "saves": int(row.get("saves", 0) or 0),
+                    "transfers_in": int(row.get("transfers_in", 0) or 0),
+                    "transfers_out": int(row.get("transfers_out", 0) or 0),
                     "selected": int(row.get("selected", 0) or 0),
                     "round": gw,
                 }

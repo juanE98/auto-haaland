@@ -12,6 +12,7 @@ Usage:
 import argparse
 import logging
 import os
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -21,36 +22,16 @@ import xgboost as xgb
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import train_test_split
 
+# Add project root to path for imports
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from lambdas.common.feature_config import FEATURE_COLS, TARGET_COL  # noqa: E402
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
-
-# Feature columns used for training (must match feature processor output)
-FEATURE_COLS = [
-    "points_last_3",
-    "points_last_5",
-    "minutes_pct",
-    "form_score",
-    "opponent_strength",
-    "home_away",
-    "chance_of_playing",
-    "form_x_difficulty",
-    "position",
-    "goals_last_3",
-    "assists_last_3",
-    "clean_sheets_last_3",
-    "bps_last_3",
-    "ict_index_last_3",
-    "threat_last_3",
-    "creativity_last_3",
-    "opponent_attack_strength",
-    "opponent_defence_strength",
-    "selected_by_percent",
-]
-
-TARGET_COL = "actual_points"
 
 # Default hyperparameters
 DEFAULT_HYPERPARAMS = {

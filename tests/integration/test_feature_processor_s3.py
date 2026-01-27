@@ -214,6 +214,7 @@ class TestFeatureProcessorS3Integration:
                     "chance_of_playing_next_round": 100,
                     "minutes": 900,
                     "selected_by_percent": "45.3",
+                    "now_cost": 130,
                 }
             ],
             "teams": [
@@ -255,6 +256,12 @@ class TestFeatureProcessorS3Integration:
                     "ict_index": "85.3",
                     "threat": "45.0",
                     "creativity": "55.0",
+                    "influence": "30.0",
+                    "bonus": 2,
+                    "yellow_cards": 0,
+                    "saves": 0,
+                    "transfers_in": 5000,
+                    "transfers_out": 2000,
                 },
                 {
                     "total_points": 12,
@@ -267,6 +274,12 @@ class TestFeatureProcessorS3Integration:
                     "ict_index": "92.1",
                     "threat": "60.0",
                     "creativity": "30.0",
+                    "influence": "40.0",
+                    "bonus": 3,
+                    "yellow_cards": 0,
+                    "saves": 0,
+                    "transfers_in": 8000,
+                    "transfers_out": 1000,
                 },
                 {
                     "total_points": 6,
@@ -279,6 +292,12 @@ class TestFeatureProcessorS3Integration:
                     "ict_index": "78.5",
                     "threat": "38.0",
                     "creativity": "62.0",
+                    "influence": "25.0",
+                    "bonus": 1,
+                    "yellow_cards": 1,
+                    "saves": 0,
+                    "transfers_in": 3000,
+                    "transfers_out": 4000,
                 },
             ]
         }
@@ -348,6 +367,7 @@ class TestFeatureProcessorS3Integration:
                     "chance_of_playing_next_round": 100,
                     "minutes": 1800,
                     "selected_by_percent": "45.3",
+                    "now_cost": 130,
                 }
             ],
             "teams": [

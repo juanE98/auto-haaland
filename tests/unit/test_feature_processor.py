@@ -7,9 +7,11 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
-from lambdas.feature_processor.handler import (
+from lambdas.common.feature_config import (
     calculate_minutes_pct,
     calculate_rolling_average,
+)
+from lambdas.feature_processor.handler import (
     engineer_features,
     get_opponent_info,
     get_team_strength,
@@ -223,6 +225,7 @@ class TestEngineerFeatures:
                     "chance_of_playing_next_round": 100,
                     "minutes": 900,
                     "selected_by_percent": "45.3",
+                    "now_cost": 130,
                 },
                 {
                     "id": 328,
@@ -233,6 +236,7 @@ class TestEngineerFeatures:
                     "chance_of_playing_next_round": 75,
                     "minutes": 810,
                     "selected_by_percent": "52.1",
+                    "now_cost": 120,
                 },
             ],
             "teams": [
@@ -290,6 +294,12 @@ class TestEngineerFeatures:
                     "ict_index": "85.3",
                     "threat": "45.0",
                     "creativity": "55.0",
+                    "influence": "30.0",
+                    "bonus": 2,
+                    "yellow_cards": 0,
+                    "saves": 0,
+                    "transfers_in": 5000,
+                    "transfers_out": 2000,
                 },
                 {
                     "total_points": 12,
@@ -302,6 +312,12 @@ class TestEngineerFeatures:
                     "ict_index": "92.1",
                     "threat": "60.0",
                     "creativity": "30.0",
+                    "influence": "40.0",
+                    "bonus": 3,
+                    "yellow_cards": 0,
+                    "saves": 0,
+                    "transfers_in": 8000,
+                    "transfers_out": 1000,
                 },
                 {
                     "total_points": 6,
@@ -314,6 +330,12 @@ class TestEngineerFeatures:
                     "ict_index": "78.5",
                     "threat": "38.0",
                     "creativity": "62.0",
+                    "influence": "25.0",
+                    "bonus": 1,
+                    "yellow_cards": 1,
+                    "saves": 0,
+                    "transfers_in": 3000,
+                    "transfers_out": 4000,
                 },
             ]
         }
@@ -423,6 +445,8 @@ class TestFeatureProcessorHandler:
                     "form": "5.0",
                     "chance_of_playing_next_round": 100,
                     "minutes": 900,
+                    "now_cost": 80,
+                    "selected_by_percent": "30.0",
                 }
             ],
             "teams": [{"id": 1, "strength": 3}],

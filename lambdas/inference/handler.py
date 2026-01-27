@@ -16,6 +16,7 @@ import xgboost as xgb
 from botocore.exceptions import ClientError
 
 from common.aws_clients import get_s3_client
+from common.feature_config import FEATURE_COLS
 
 # Configure logging
 logger = logging.getLogger()
@@ -25,29 +26,6 @@ logger.setLevel(logging.INFO)
 BUCKET_NAME = os.getenv("BUCKET_NAME", "fpl-ml-data")
 MODEL_KEY = os.getenv("MODEL_KEY", "models/model.xgb")
 AWS_ENDPOINT_URL = os.getenv("AWS_ENDPOINT_URL")  # For LocalStack
-
-# Feature columns (must match training)
-FEATURE_COLS = [
-    "points_last_3",
-    "points_last_5",
-    "minutes_pct",
-    "form_score",
-    "opponent_strength",
-    "home_away",
-    "chance_of_playing",
-    "form_x_difficulty",
-    "position",
-    "goals_last_3",
-    "assists_last_3",
-    "clean_sheets_last_3",
-    "bps_last_3",
-    "ict_index_last_3",
-    "threat_last_3",
-    "creativity_last_3",
-    "opponent_attack_strength",
-    "opponent_defence_strength",
-    "selected_by_percent",
-]
 
 # Position mapping (element_type to string)
 POSITION_MAP = {
