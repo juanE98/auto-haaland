@@ -68,6 +68,12 @@ def sample_features_df():
             "assists_last_3": [0.33, 0.0, 0.67],
             "clean_sheets_last_3": [0.0, 0.0, 0.33],
             "bps_last_3": [28.0, 32.0, 25.0],
+            "ict_index_last_3": [85.3, 92.1, 78.5],
+            "threat_last_3": [45.0, 60.0, 38.0],
+            "creativity_last_3": [55.0, 30.0, 62.0],
+            "opponent_attack_strength": [1200, 1350, 1100],
+            "opponent_defence_strength": [1250, 1300, 1150],
+            "selected_by_percent": [45.3, 52.1, 38.7],
         }
     )
 

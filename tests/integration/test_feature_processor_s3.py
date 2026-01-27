@@ -213,11 +213,28 @@ class TestFeatureProcessorS3Integration:
                     "form": "8.5",
                     "chance_of_playing_next_round": 100,
                     "minutes": 900,
+                    "selected_by_percent": "45.3",
                 }
             ],
             "teams": [
-                {"id": 1, "name": "Arsenal", "strength": 4},
-                {"id": 10, "name": "Liverpool", "strength": 5},
+                {
+                    "id": 1,
+                    "name": "Arsenal",
+                    "strength": 4,
+                    "strength_attack_home": 1300,
+                    "strength_attack_away": 1250,
+                    "strength_defence_home": 1280,
+                    "strength_defence_away": 1230,
+                },
+                {
+                    "id": 10,
+                    "name": "Liverpool",
+                    "strength": 5,
+                    "strength_attack_home": 1350,
+                    "strength_attack_away": 1300,
+                    "strength_defence_home": 1320,
+                    "strength_defence_away": 1270,
+                },
             ],
         }
 
@@ -235,6 +252,9 @@ class TestFeatureProcessorS3Integration:
                     "assists": 0,
                     "clean_sheets": 0,
                     "bps": 28,
+                    "ict_index": "85.3",
+                    "threat": "45.0",
+                    "creativity": "55.0",
                 },
                 {
                     "total_points": 12,
@@ -244,6 +264,9 @@ class TestFeatureProcessorS3Integration:
                     "assists": 1,
                     "clean_sheets": 0,
                     "bps": 35,
+                    "ict_index": "92.1",
+                    "threat": "60.0",
+                    "creativity": "30.0",
                 },
                 {
                     "total_points": 6,
@@ -253,6 +276,9 @@ class TestFeatureProcessorS3Integration:
                     "assists": 1,
                     "clean_sheets": 1,
                     "bps": 22,
+                    "ict_index": "78.5",
+                    "threat": "38.0",
+                    "creativity": "62.0",
                 },
             ]
         }
@@ -321,11 +347,28 @@ class TestFeatureProcessorS3Integration:
                     "form": "8.5",
                     "chance_of_playing_next_round": 100,
                     "minutes": 1800,
+                    "selected_by_percent": "45.3",
                 }
             ],
             "teams": [
-                {"id": 1, "name": "Arsenal", "strength": 4},
-                {"id": 10, "name": "Liverpool", "strength": 5},
+                {
+                    "id": 1,
+                    "name": "Arsenal",
+                    "strength": 4,
+                    "strength_attack_home": 1300,
+                    "strength_attack_away": 1250,
+                    "strength_defence_home": 1280,
+                    "strength_defence_away": 1230,
+                },
+                {
+                    "id": 10,
+                    "name": "Liverpool",
+                    "strength": 5,
+                    "strength_attack_home": 1350,
+                    "strength_attack_away": 1300,
+                    "strength_defence_home": 1320,
+                    "strength_defence_away": 1270,
+                },
             ],
         }
 

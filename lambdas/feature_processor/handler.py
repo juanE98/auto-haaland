@@ -143,7 +143,7 @@ def get_team_strength(teams: List[Dict], team_id: int) -> int:
 
 def get_opponent_info(
     player_team_id: int, fixtures: List[Dict], teams: List[Dict]
-) -> Tuple[int, int]:
+) -> Tuple[int, int, int, int]:
     """
     Get opponent strength and home/away status from fixtures.
 
@@ -153,20 +153,35 @@ def get_opponent_info(
         teams: List of team data
 
     Returns:
-        Tuple of (opponent_strength, is_home) where is_home is 1 or 0
+        Tuple of (opponent_strength, is_home, opp_attack_strength,
+        opp_defence_strength) where is_home is 1 or 0
     """
     for fixture in fixtures:
         if fixture.get("team_h") == player_team_id:
-            # Player's team is home
+            # Player's team is home, opponent is away
             opponent_id = fixture.get("team_a")
-            return get_team_strength(teams, opponent_id), 1
+            opp_attack = 1200
+            opp_defence = 1200
+            for team in teams:
+                if team["id"] == opponent_id:
+                    opp_attack = team.get("strength_attack_away", 1200)
+                    opp_defence = team.get("strength_defence_away", 1200)
+                    break
+            return get_team_strength(teams, opponent_id), 1, opp_attack, opp_defence
         elif fixture.get("team_a") == player_team_id:
-            # Player's team is away
+            # Player's team is away, opponent is home
             opponent_id = fixture.get("team_h")
-            return get_team_strength(teams, opponent_id), 0
+            opp_attack = 1200
+            opp_defence = 1200
+            for team in teams:
+                if team["id"] == opponent_id:
+                    opp_attack = team.get("strength_attack_home", 1200)
+                    opp_defence = team.get("strength_defence_home", 1200)
+                    break
+            return get_team_strength(teams, opponent_id), 0, opp_attack, opp_defence
 
     # No fixture found (could be blank gameweek)
-    return 3, 0
+    return 3, 0, 1200, 1200
 
 
 def engineer_features(
@@ -215,6 +230,12 @@ def engineer_features(
             assists_last_3 = calculate_rolling_average(assists_list, 3)
             clean_sheets_last_3 = calculate_rolling_average(cs_list, 3)
             bps_last_3 = calculate_rolling_average(bps_list, 3)
+            ict_list = [float(h.get("ict_index", 0) or 0) for h in history]
+            threat_list = [float(h.get("threat", 0) or 0) for h in history]
+            creativity_list = [float(h.get("creativity", 0) or 0) for h in history]
+            ict_index_last_3 = calculate_rolling_average(ict_list, 3)
+            threat_last_3 = calculate_rolling_average(threat_list, 3)
+            creativity_last_3 = calculate_rolling_average(creativity_list, 3)
         else:
             # Fallback to bootstrap form field
             form = float(player.get("form", 0) or 0)
@@ -229,9 +250,15 @@ def engineer_features(
             assists_last_3 = 0.0
             clean_sheets_last_3 = 0.0
             bps_last_3 = 0.0
+            ict_index_last_3 = 0.0
+            threat_last_3 = 0.0
+            creativity_last_3 = 0.0
 
         # Form score from bootstrap
         form_score = float(player.get("form", 0) or 0)
+
+        # Selected by percent (ownership)
+        selected_by_percent = float(player.get("selected_by_percent", 0) or 0)
 
         # Chance of playing
         chance_of_playing = player.get("chance_of_playing_next_round")
@@ -239,7 +266,9 @@ def engineer_features(
             chance_of_playing = 100  # Assume available if not specified
 
         # Get opponent info from fixtures
-        opponent_strength, home_away = get_opponent_info(team_id, fixtures, teams)
+        opponent_strength, home_away, opp_attack_strength, opp_defence_strength = (
+            get_opponent_info(team_id, fixtures, teams)
+        )
 
         # Interaction feature
         form_x_difficulty = form_score * opponent_strength
@@ -262,6 +291,12 @@ def engineer_features(
             "assists_last_3": round(assists_last_3, 2),
             "clean_sheets_last_3": round(clean_sheets_last_3, 2),
             "bps_last_3": round(bps_last_3, 2),
+            "ict_index_last_3": round(ict_index_last_3, 2),
+            "threat_last_3": round(threat_last_3, 2),
+            "creativity_last_3": round(creativity_last_3, 2),
+            "opponent_attack_strength": opp_attack_strength,
+            "opponent_defence_strength": opp_defence_strength,
+            "selected_by_percent": selected_by_percent,
         }
 
         # Add actual points for historical mode (training target)

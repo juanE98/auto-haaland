@@ -46,6 +46,12 @@ FEATURE_COLS = [
     "assists_last_3",
     "clean_sheets_last_3",
     "bps_last_3",
+    "ict_index_last_3",
+    "threat_last_3",
+    "creativity_last_3",
+    "opponent_attack_strength",
+    "opponent_defence_strength",
+    "selected_by_percent",
 ]
 
 # Batch size for player summary API calls
@@ -77,6 +83,30 @@ def get_team_strength_map(teams: list[dict]) -> dict[int, int]:
         Dict mapping team ID to strength (1-5)
     """
     return {t["id"]: t.get("strength", 3) for t in teams}
+
+
+def get_team_attack_defence_map(
+    teams: list[dict],
+) -> dict[int, dict[str, int]]:
+    """
+    Build team ID to attack/defence strength mapping from bootstrap teams.
+
+    Args:
+        teams: List of team dicts from bootstrap-static
+
+    Returns:
+        Dict mapping team ID to {"attack_home", "attack_away",
+        "defence_home", "defence_away"}
+    """
+    return {
+        t["id"]: {
+            "attack_home": t.get("strength_attack_home", 1200),
+            "attack_away": t.get("strength_attack_away", 1200),
+            "defence_home": t.get("strength_defence_home", 1200),
+            "defence_away": t.get("strength_defence_away", 1200),
+        }
+        for t in teams
+    }
 
 
 def fetch_all_player_histories(
@@ -183,7 +213,8 @@ def get_fixture_info(
     player_team_id: int,
     fixtures: list[dict],
     team_strength_map: dict[int, int],
-) -> tuple[int, int]:
+    team_attack_defence_map: dict[int, dict[str, int]] | None = None,
+) -> tuple[int, int, int, int]:
     """
     Get opponent strength and home/away status from fixtures.
 
@@ -191,19 +222,36 @@ def get_fixture_info(
         player_team_id: Player's team ID
         fixtures: List of fixtures for the gameweek
         team_strength_map: Team ID to strength mapping
+        team_attack_defence_map: Optional team ID to attack/defence mapping
 
     Returns:
-        Tuple of (opponent_strength, is_home)
+        Tuple of (opponent_strength, is_home, opp_attack_strength,
+        opp_defence_strength)
     """
+    ad_map = team_attack_defence_map or {}
     for fixture in fixtures:
         if fixture.get("team_h") == player_team_id:
+            # Player is home, opponent is away
             opponent_id = fixture.get("team_a")
-            return team_strength_map.get(opponent_id, 3), 1
+            ad = ad_map.get(opponent_id, {})
+            return (
+                team_strength_map.get(opponent_id, 3),
+                1,
+                ad.get("attack_away", 1200),
+                ad.get("defence_away", 1200),
+            )
         elif fixture.get("team_a") == player_team_id:
+            # Player is away, opponent is home
             opponent_id = fixture.get("team_h")
-            return team_strength_map.get(opponent_id, 3), 0
+            ad = ad_map.get(opponent_id, {})
+            return (
+                team_strength_map.get(opponent_id, 3),
+                0,
+                ad.get("attack_home", 1200),
+                ad.get("defence_home", 1200),
+            )
 
-    return 3, 0
+    return 3, 0, 1200, 1200
 
 
 def engineer_backfill_features(
@@ -212,6 +260,7 @@ def engineer_backfill_features(
     fixtures: list[dict],
     team_strength_map: dict[int, int],
     gameweek: int,
+    team_attack_defence_map: dict[int, dict[str, int]] | None = None,
 ) -> pd.DataFrame:
     """
     Engineer training features for a historical gameweek using API data.
@@ -224,6 +273,7 @@ def engineer_backfill_features(
         fixtures: Fixtures for the target gameweek
         team_strength_map: Team ID to strength mapping
         gameweek: Target gameweek number
+        team_attack_defence_map: Optional team ID to attack/defence mapping
 
     Returns:
         DataFrame with features and actual_points target
@@ -261,6 +311,14 @@ def engineer_backfill_features(
             assists_last_3 = calculate_rolling_average(assists_list, 3)
             clean_sheets_last_3 = calculate_rolling_average(cs_list, 3)
             bps_last_3 = calculate_rolling_average(bps_list, 3)
+            ict_list = [float(h.get("ict_index", 0) or 0) for h in prior_history]
+            threat_list = [float(h.get("threat", 0) or 0) for h in prior_history]
+            creativity_list = [
+                float(h.get("creativity", 0) or 0) for h in prior_history
+            ]
+            ict_index_last_3 = calculate_rolling_average(ict_list, 3)
+            threat_last_3 = calculate_rolling_average(threat_list, 3)
+            creativity_last_3 = calculate_rolling_average(creativity_list, 3)
         else:
             points_last_3 = 0.0
             points_last_5 = 0.0
@@ -270,11 +328,19 @@ def engineer_backfill_features(
             assists_last_3 = 0.0
             clean_sheets_last_3 = 0.0
             bps_last_3 = 0.0
+            ict_index_last_3 = 0.0
+            threat_last_3 = 0.0
+            creativity_last_3 = 0.0
 
         # Opponent info from fixtures
-        opponent_strength, home_away = get_fixture_info(
-            team_id, fixtures, team_strength_map
+        opponent_strength, home_away, opp_attack_strength, opp_defence_strength = (
+            get_fixture_info(
+                team_id, fixtures, team_strength_map, team_attack_defence_map
+            )
         )
+
+        # Selected by percent (ownership from bootstrap)
+        selected_by_percent = float(player.get("selected_by_percent", 0) or 0)
 
         # Chance of playing: not reliably available historically
         chance_of_playing = 100
@@ -300,6 +366,12 @@ def engineer_backfill_features(
             "assists_last_3": round(assists_last_3, 2),
             "clean_sheets_last_3": round(clean_sheets_last_3, 2),
             "bps_last_3": round(bps_last_3, 2),
+            "ict_index_last_3": round(ict_index_last_3, 2),
+            "threat_last_3": round(threat_last_3, 2),
+            "creativity_last_3": round(creativity_last_3, 2),
+            "opponent_attack_strength": opp_attack_strength,
+            "opponent_defence_strength": opp_defence_strength,
+            "selected_by_percent": selected_by_percent,
             "actual_points": actual_points,
         }
 
@@ -404,6 +476,7 @@ def main():
         logger.info(f"Season: {season}, Players: {len(players)}, Teams: {len(teams)}")
 
         team_strength_map = get_team_strength_map(teams)
+        team_attack_defence_map = get_team_attack_defence_map(teams)
 
         # Step 2: Get finished gameweeks
         finished_gws = get_finished_gameweeks(events)
@@ -441,7 +514,12 @@ def main():
 
             # Engineer features
             features_df = engineer_backfill_features(
-                players, all_histories, fixtures, team_strength_map, gw
+                players,
+                all_histories,
+                fixtures,
+                team_strength_map,
+                gw,
+                team_attack_defence_map,
             )
 
             if len(features_df) > 0:
