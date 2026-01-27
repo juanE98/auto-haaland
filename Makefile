@@ -111,7 +111,7 @@ top:
 ifndef GW
 	$(error GW is required. Usage: make top GW=22)
 endif
-	venv/bin/python -m cli.fpl --endpoint $(API_ENDPOINT) top -g $(GW) $(if $(LIMIT),-l $(LIMIT),)
+	venv/bin/python -m cli.fpl --endpoint $(API_ENDPOINT) top -g $(GW) $(if $(LIMIT),-n $(LIMIT),)
 
 player:
 ifndef ID
