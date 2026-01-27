@@ -1,4 +1,7 @@
-.PHONY: setup install test test-unit test-integration local-up local-down local-api local-logs clean help import-historical backfill train-and-upload top player compare predictions run-pipeline
+.PHONY: setup install test test-unit test-integration local-up local-down local-api local-logs clean help import-historical backfill train-local train-and-upload top player compare predictions run-pipeline lint format
+
+# Helper for comma in $(if ...) expansions
+comma := ,
 
 # Default target
 help:
@@ -26,11 +29,19 @@ help:
 	@echo "  make train-and-upload  - Train locally and upload model to S3"
 	@echo ""
 	@echo "CLI Queries (GW is required):"
-	@echo "  make top GW=22                 - Top predicted scorers for gameweek"
+	@echo "  make top GW=22                 - Top 10 predicted scorers for gameweek"
+	@echo "  make top GW=22 LIMIT=20        - Top N predicted scorers for gameweek"
 	@echo "  make player ID=328 GW=22       - Predictions for a specific player"
 	@echo "  make compare IDS=328,350 GW=22 - Compare players for a gameweek"
 	@echo "  make predictions GW=22         - All predictions for a gameweek"
-	@echo "  make run-pipeline              - Trigger the Step Functions pipeline"
+	@echo ""
+	@echo "Pipeline:"
+	@echo "  make run-pipeline              - Trigger pipeline (auto-detect gameweek)"
+	@echo "  make run-pipeline GW=23        - Trigger pipeline for specific gameweek"
+	@echo ""
+	@echo "Code Quality:"
+	@echo "  make lint           - Run lint checks (black, isort, flake8)"
+	@echo "  make format         - Auto-format code (black, isort)"
 	@echo ""
 	@echo "AWS Deployment:"
 	@echo "  make build          - Build SAM application"
@@ -100,7 +111,7 @@ top:
 ifndef GW
 	$(error GW is required. Usage: make top GW=22)
 endif
-	venv/bin/python -m cli.fpl --endpoint $(API_ENDPOINT) top -g $(GW)
+	venv/bin/python -m cli.fpl --endpoint $(API_ENDPOINT) top -g $(GW) $(if $(LIMIT),-l $(LIMIT),)
 
 player:
 ifndef ID
@@ -127,7 +138,24 @@ endif
 	venv/bin/python -m cli.fpl --endpoint $(API_ENDPOINT) predictions -g $(GW)
 
 run-pipeline:
-	venv/bin/python -m cli.fpl run --state-machine $(STATE_MACHINE_ARN)
+	@echo "Triggering FPL prediction pipeline..."
+	aws stepfunctions start-execution \
+		--state-machine-arn $(STATE_MACHINE_ARN) \
+		--input '{"fetch_player_details": true$(if $(GW), $(comma) "gameweek": $(GW),)}' \
+		--region ap-southeast-2
+
+lint:
+	@echo "Running lint checks..."
+	venv/bin/black --check lambdas cli tests sagemaker scripts
+	venv/bin/isort --check-only lambdas cli tests scripts
+	venv/bin/flake8 lambdas cli scripts --max-line-length=120 --ignore=E501,W503,E203
+	@echo "All lint checks passed!"
+
+format:
+	@echo "Formatting code..."
+	venv/bin/black lambdas cli tests sagemaker scripts
+	venv/bin/isort lambdas cli tests scripts
+	@echo "Formatting complete!"
 
 build:
 	@echo "Building SAM application..."
