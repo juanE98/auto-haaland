@@ -7,9 +7,11 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
-from lambdas.feature_processor.handler import (
+from lambdas.common.feature_config import (
     calculate_minutes_pct,
     calculate_rolling_average,
+)
+from lambdas.feature_processor.handler import (
     engineer_features,
     get_opponent_info,
     get_team_strength,
@@ -125,16 +127,35 @@ class TestGetOpponentInfo:
             {"team_h": 10, "team_a": 1}  # Liverpool (10) vs Arsenal (1) at home
         ]
         teams = [
-            {"id": 1, "name": "Arsenal", "strength": 4},
-            {"id": 10, "name": "Liverpool", "strength": 5},
+            {
+                "id": 1,
+                "name": "Arsenal",
+                "strength": 4,
+                "strength_attack_home": 1300,
+                "strength_attack_away": 1250,
+                "strength_defence_home": 1280,
+                "strength_defence_away": 1230,
+            },
+            {
+                "id": 10,
+                "name": "Liverpool",
+                "strength": 5,
+                "strength_attack_home": 1350,
+                "strength_attack_away": 1300,
+                "strength_defence_home": 1320,
+                "strength_defence_away": 1270,
+            },
         ]
 
-        opponent_strength, is_home = get_opponent_info(
+        opponent_strength, is_home, opp_attack, opp_defence = get_opponent_info(
             player_team_id=10, fixtures=fixtures, teams=teams
         )
 
         assert opponent_strength == 4  # Arsenal's strength
         assert is_home == 1
+        # Opponent (Arsenal) is away, so use away variants
+        assert opp_attack == 1250
+        assert opp_defence == 1230
 
     def test_away_game(self):
         """Test player's team playing away."""
@@ -142,28 +163,49 @@ class TestGetOpponentInfo:
             {"team_h": 1, "team_a": 10}  # Arsenal (1) vs Liverpool (10) at Arsenal
         ]
         teams = [
-            {"id": 1, "name": "Arsenal", "strength": 4},
-            {"id": 10, "name": "Liverpool", "strength": 5},
+            {
+                "id": 1,
+                "name": "Arsenal",
+                "strength": 4,
+                "strength_attack_home": 1300,
+                "strength_attack_away": 1250,
+                "strength_defence_home": 1280,
+                "strength_defence_away": 1230,
+            },
+            {
+                "id": 10,
+                "name": "Liverpool",
+                "strength": 5,
+                "strength_attack_home": 1350,
+                "strength_attack_away": 1300,
+                "strength_defence_home": 1320,
+                "strength_defence_away": 1270,
+            },
         ]
 
-        opponent_strength, is_home = get_opponent_info(
+        opponent_strength, is_home, opp_attack, opp_defence = get_opponent_info(
             player_team_id=10, fixtures=fixtures, teams=teams
         )
 
         assert opponent_strength == 4  # Arsenal's strength
         assert is_home == 0
+        # Opponent (Arsenal) is home, so use home variants
+        assert opp_attack == 1300
+        assert opp_defence == 1280
 
     def test_no_fixture_found(self):
         """Test when team has no fixture (blank gameweek)."""
         fixtures = [{"team_h": 1, "team_a": 2}]  # Fixture doesn't include team 10
         teams = [{"id": 1, "strength": 4}, {"id": 2, "strength": 3}]
 
-        opponent_strength, is_home = get_opponent_info(
+        opponent_strength, is_home, opp_attack, opp_defence = get_opponent_info(
             player_team_id=10, fixtures=fixtures, teams=teams
         )
 
         assert opponent_strength == 3  # Default
         assert is_home == 0
+        assert opp_attack == 1200  # Default
+        assert opp_defence == 1200  # Default
 
 
 class TestEngineerFeatures:
@@ -182,6 +224,8 @@ class TestEngineerFeatures:
                     "form": "8.5",
                     "chance_of_playing_next_round": 100,
                     "minutes": 900,
+                    "selected_by_percent": "45.3",
+                    "now_cost": 130,
                 },
                 {
                     "id": 328,
@@ -191,12 +235,38 @@ class TestEngineerFeatures:
                     "form": "7.2",
                     "chance_of_playing_next_round": 75,
                     "minutes": 810,
+                    "selected_by_percent": "52.1",
+                    "now_cost": 120,
                 },
             ],
             "teams": [
-                {"id": 1, "name": "Arsenal", "strength": 4},
-                {"id": 10, "name": "Liverpool", "strength": 5},
-                {"id": 11, "name": "Man City", "strength": 5},
+                {
+                    "id": 1,
+                    "name": "Arsenal",
+                    "strength": 4,
+                    "strength_attack_home": 1300,
+                    "strength_attack_away": 1250,
+                    "strength_defence_home": 1280,
+                    "strength_defence_away": 1230,
+                },
+                {
+                    "id": 10,
+                    "name": "Liverpool",
+                    "strength": 5,
+                    "strength_attack_home": 1350,
+                    "strength_attack_away": 1300,
+                    "strength_defence_home": 1320,
+                    "strength_defence_away": 1270,
+                },
+                {
+                    "id": 11,
+                    "name": "Man City",
+                    "strength": 5,
+                    "strength_attack_home": 1380,
+                    "strength_attack_away": 1330,
+                    "strength_defence_home": 1350,
+                    "strength_defence_away": 1300,
+                },
             ],
         }
 
@@ -213,9 +283,60 @@ class TestEngineerFeatures:
         """Sample player histories."""
         return {
             350: [
-                {"total_points": 8, "minutes": 90, "round": 18},
-                {"total_points": 12, "minutes": 90, "round": 19},
-                {"total_points": 6, "minutes": 90, "round": 20},
+                {
+                    "total_points": 8,
+                    "minutes": 90,
+                    "round": 18,
+                    "goals_scored": 1,
+                    "assists": 0,
+                    "clean_sheets": 0,
+                    "bps": 28,
+                    "ict_index": "85.3",
+                    "threat": "45.0",
+                    "creativity": "55.0",
+                    "influence": "30.0",
+                    "bonus": 2,
+                    "yellow_cards": 0,
+                    "saves": 0,
+                    "transfers_in": 5000,
+                    "transfers_out": 2000,
+                },
+                {
+                    "total_points": 12,
+                    "minutes": 90,
+                    "round": 19,
+                    "goals_scored": 1,
+                    "assists": 1,
+                    "clean_sheets": 0,
+                    "bps": 35,
+                    "ict_index": "92.1",
+                    "threat": "60.0",
+                    "creativity": "30.0",
+                    "influence": "40.0",
+                    "bonus": 3,
+                    "yellow_cards": 0,
+                    "saves": 0,
+                    "transfers_in": 8000,
+                    "transfers_out": 1000,
+                },
+                {
+                    "total_points": 6,
+                    "minutes": 90,
+                    "round": 20,
+                    "goals_scored": 0,
+                    "assists": 1,
+                    "clean_sheets": 1,
+                    "bps": 22,
+                    "ict_index": "78.5",
+                    "threat": "38.0",
+                    "creativity": "62.0",
+                    "influence": "25.0",
+                    "bonus": 1,
+                    "yellow_cards": 1,
+                    "saves": 0,
+                    "transfers_in": 3000,
+                    "transfers_out": 4000,
+                },
             ]
         }
 
@@ -324,6 +445,8 @@ class TestFeatureProcessorHandler:
                     "form": "5.0",
                     "chance_of_playing_next_round": 100,
                     "minutes": 900,
+                    "now_cost": 80,
+                    "selected_by_percent": "30.0",
                 }
             ],
             "teams": [{"id": 1, "strength": 3}],
