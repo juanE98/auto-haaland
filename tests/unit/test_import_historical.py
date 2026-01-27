@@ -5,10 +5,9 @@ Unit tests for the historical data import script.
 import pandas as pd
 import pytest
 
+from lambdas.common.feature_config import FEATURE_COLS
 from scripts.import_historical import (
     build_team_strength_map,
-    calculate_minutes_pct,
-    calculate_rolling_average,
     convert_season_format,
     engineer_historical_features,
 )
@@ -27,66 +26,6 @@ class TestConvertSeasonFormat:
     def test_no_dash(self):
         """A season without a dash should pass through unchanged."""
         assert convert_season_format("2023_24") == "2023_24"
-
-
-# === Rolling Average ===
-
-
-@pytest.mark.unit
-class TestRollingAverage:
-    def test_exact_window(self):
-        result = calculate_rolling_average([2.0, 4.0, 6.0], 3)
-        assert result == pytest.approx(4.0)
-
-    def test_window_larger_than_data(self):
-        """When fewer values than window, average all available data."""
-        result = calculate_rolling_average([3.0, 5.0], 5)
-        assert result == pytest.approx(4.0)
-
-    def test_window_smaller_than_data(self):
-        """Only the last `window` values should be used."""
-        result = calculate_rolling_average([1.0, 2.0, 3.0, 10.0, 20.0], 3)
-        assert result == pytest.approx(11.0)
-
-    def test_empty_list(self):
-        assert calculate_rolling_average([], 3) == 0.0
-
-    def test_single_value(self):
-        assert calculate_rolling_average([7.0], 3) == pytest.approx(7.0)
-
-    def test_window_of_one(self):
-        result = calculate_rolling_average([1.0, 2.0, 5.0], 1)
-        assert result == pytest.approx(5.0)
-
-
-# === Minutes Percentage ===
-
-
-@pytest.mark.unit
-class TestMinutesPct:
-    def test_full_minutes(self):
-        result = calculate_minutes_pct([90, 90, 90], 3)
-        assert result == pytest.approx(1.0)
-
-    def test_no_minutes(self):
-        result = calculate_minutes_pct([0, 0, 0], 3)
-        assert result == pytest.approx(0.0)
-
-    def test_partial_minutes(self):
-        result = calculate_minutes_pct([45, 90, 90], 3)
-        assert result == pytest.approx(225 / 270)
-
-    def test_empty_list(self):
-        assert calculate_minutes_pct([], 5) == 0.0
-
-    def test_window_larger_than_data(self):
-        result = calculate_minutes_pct([90, 45], 5)
-        assert result == pytest.approx(135 / 180)
-
-    def test_window_limits_data(self):
-        """Only the last `window` entries should be considered."""
-        result = calculate_minutes_pct([0, 0, 0, 90, 90], 2)
-        assert result == pytest.approx(1.0)
 
 
 # === Team Strength Map ===
@@ -157,6 +96,16 @@ class TestEngineerHistoricalFeatures:
                     "assists": 0,
                     "clean_sheets": 0,
                     "bps": 22,
+                    "ict_index": 85.3,
+                    "threat": 45.0,
+                    "creativity": 55.0,
+                    "influence": 30.0,
+                    "bonus": 2,
+                    "yellow_cards": 0,
+                    "saves": 0,
+                    "transfers_in": 5000,
+                    "transfers_out": 2000,
+                    "selected": 100000,
                 },
                 {
                     "total_points": 4,
@@ -166,6 +115,16 @@ class TestEngineerHistoricalFeatures:
                     "assists": 1,
                     "clean_sheets": 0,
                     "bps": 18,
+                    "ict_index": 72.1,
+                    "threat": 38.0,
+                    "creativity": 48.0,
+                    "influence": 25.0,
+                    "bonus": 0,
+                    "yellow_cards": 1,
+                    "saves": 0,
+                    "transfers_in": 3000,
+                    "transfers_out": 4000,
+                    "selected": 110000,
                 },
                 {
                     "total_points": 10,
@@ -175,6 +134,16 @@ class TestEngineerHistoricalFeatures:
                     "assists": 1,
                     "clean_sheets": 1,
                     "bps": 35,
+                    "ict_index": 92.0,
+                    "threat": 60.0,
+                    "creativity": 30.0,
+                    "influence": 40.0,
+                    "bonus": 3,
+                    "yellow_cards": 0,
+                    "saves": 0,
+                    "transfers_in": 8000,
+                    "transfers_out": 1000,
+                    "selected": 120000,
                 },
             ]
         }
@@ -294,26 +263,9 @@ class TestEngineerHistoricalFeatures:
 
         result = engineer_historical_features(gw_df, 4, {}, {5: 3})
 
-        expected_cols = {
-            "player_id",
-            "player_name",
-            "team_id",
-            "position",
-            "gameweek",
-            "points_last_3",
-            "points_last_5",
-            "minutes_pct",
-            "form_score",
-            "opponent_strength",
-            "home_away",
-            "chance_of_playing",
-            "form_x_difficulty",
-            "goals_last_3",
-            "assists_last_3",
-            "clean_sheets_last_3",
-            "bps_last_3",
-            "actual_points",
-        }
+        # Metadata columns + feature columns + target
+        metadata_cols = {"player_id", "player_name", "team_id", "gameweek"}
+        expected_cols = metadata_cols | set(FEATURE_COLS) | {"actual_points"}
         assert set(result.columns) == expected_cols
 
     def test_form_x_difficulty_calculation(self):
@@ -343,6 +295,16 @@ class TestEngineerHistoricalFeatures:
                     "assists": 0,
                     "clean_sheets": 0,
                     "bps": 28,
+                    "ict_index": 85.0,
+                    "threat": 50.0,
+                    "creativity": 40.0,
+                    "influence": 35.0,
+                    "bonus": 2,
+                    "yellow_cards": 0,
+                    "saves": 0,
+                    "transfers_in": 6000,
+                    "transfers_out": 2000,
+                    "selected": 90000,
                 },
                 {
                     "total_points": 6,
@@ -352,6 +314,16 @@ class TestEngineerHistoricalFeatures:
                     "assists": 1,
                     "clean_sheets": 0,
                     "bps": 22,
+                    "ict_index": 72.0,
+                    "threat": 35.0,
+                    "creativity": 50.0,
+                    "influence": 28.0,
+                    "bonus": 1,
+                    "yellow_cards": 1,
+                    "saves": 0,
+                    "transfers_in": 4000,
+                    "transfers_out": 3000,
+                    "selected": 95000,
                 },
                 {
                     "total_points": 4,
@@ -361,6 +333,16 @@ class TestEngineerHistoricalFeatures:
                     "assists": 0,
                     "clean_sheets": 1,
                     "bps": 18,
+                    "ict_index": 60.0,
+                    "threat": 25.0,
+                    "creativity": 45.0,
+                    "influence": 22.0,
+                    "bonus": 0,
+                    "yellow_cards": 0,
+                    "saves": 0,
+                    "transfers_in": 2000,
+                    "transfers_out": 5000,
+                    "selected": 88000,
                 },
             ]
         }
