@@ -49,6 +49,12 @@ FEATURE_COLS = [
     "assists_last_3",
     "clean_sheets_last_3",
     "bps_last_3",
+    "ict_index_last_3",
+    "threat_last_3",
+    "creativity_last_3",
+    "opponent_attack_strength",
+    "opponent_defence_strength",
+    "selected_by_percent",
 ]
 
 TARGET_COL = "actual_points"

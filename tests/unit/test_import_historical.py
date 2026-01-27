@@ -157,6 +157,10 @@ class TestEngineerHistoricalFeatures:
                     "assists": 0,
                     "clean_sheets": 0,
                     "bps": 22,
+                    "ict_index": 85.3,
+                    "threat": 45.0,
+                    "creativity": 55.0,
+                    "selected": 100000,
                 },
                 {
                     "total_points": 4,
@@ -166,6 +170,10 @@ class TestEngineerHistoricalFeatures:
                     "assists": 1,
                     "clean_sheets": 0,
                     "bps": 18,
+                    "ict_index": 72.1,
+                    "threat": 38.0,
+                    "creativity": 48.0,
+                    "selected": 110000,
                 },
                 {
                     "total_points": 10,
@@ -175,6 +183,10 @@ class TestEngineerHistoricalFeatures:
                     "assists": 1,
                     "clean_sheets": 1,
                     "bps": 35,
+                    "ict_index": 92.0,
+                    "threat": 60.0,
+                    "creativity": 30.0,
+                    "selected": 120000,
                 },
             ]
         }
@@ -312,6 +324,12 @@ class TestEngineerHistoricalFeatures:
             "assists_last_3",
             "clean_sheets_last_3",
             "bps_last_3",
+            "ict_index_last_3",
+            "threat_last_3",
+            "creativity_last_3",
+            "opponent_attack_strength",
+            "opponent_defence_strength",
+            "selected_by_percent",
             "actual_points",
         }
         assert set(result.columns) == expected_cols
@@ -343,6 +361,10 @@ class TestEngineerHistoricalFeatures:
                     "assists": 0,
                     "clean_sheets": 0,
                     "bps": 28,
+                    "ict_index": 85.0,
+                    "threat": 50.0,
+                    "creativity": 40.0,
+                    "selected": 90000,
                 },
                 {
                     "total_points": 6,
@@ -352,6 +374,10 @@ class TestEngineerHistoricalFeatures:
                     "assists": 1,
                     "clean_sheets": 0,
                     "bps": 22,
+                    "ict_index": 72.0,
+                    "threat": 35.0,
+                    "creativity": 50.0,
+                    "selected": 95000,
                 },
                 {
                     "total_points": 4,
@@ -361,6 +387,10 @@ class TestEngineerHistoricalFeatures:
                     "assists": 0,
                     "clean_sheets": 1,
                     "bps": 18,
+                    "ict_index": 60.0,
+                    "threat": 25.0,
+                    "creativity": 45.0,
+                    "selected": 88000,
                 },
             ]
         }

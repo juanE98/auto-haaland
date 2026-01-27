@@ -47,6 +47,12 @@ FEATURE_COLS = [
     "assists_last_3",
     "clean_sheets_last_3",
     "bps_last_3",
+    "ict_index_last_3",
+    "threat_last_3",
+    "creativity_last_3",
+    "opponent_attack_strength",
+    "opponent_defence_strength",
+    "selected_by_percent",
 ]
 
 # Mapping from position string to numeric element_type
@@ -143,6 +149,34 @@ def build_team_strength_map(teams_df: pd.DataFrame) -> dict[int, int]:
     return strength_map
 
 
+def build_team_attack_defence_map(
+    teams_df: pd.DataFrame,
+) -> dict[int, dict[str, int]]:
+    """
+    Build a mapping from team ID to attack/defence strength ratings.
+
+    The vaastav teams.csv has strength_attack_home, strength_attack_away,
+    strength_defence_home, strength_defence_away columns (~1000-1400 scale).
+
+    Args:
+        teams_df: DataFrame from teams.csv
+
+    Returns:
+        Dict mapping team ID to {"attack_home", "attack_away",
+        "defence_home", "defence_away"}
+    """
+    ad_map: dict[int, dict[str, int]] = {}
+    for _, row in teams_df.iterrows():
+        team_id = int(row.get("id", row.get("team_id", 0)))
+        ad_map[team_id] = {
+            "attack_home": int(row.get("strength_attack_home", 1200)),
+            "attack_away": int(row.get("strength_attack_away", 1200)),
+            "defence_home": int(row.get("strength_defence_home", 1200)),
+            "defence_away": int(row.get("strength_defence_away", 1200)),
+        }
+    return ad_map
+
+
 def build_team_name_map(teams_df: pd.DataFrame) -> dict[str, int]:
     """
     Build a mapping from team name/short_name to team ID.
@@ -206,6 +240,7 @@ def engineer_historical_features(
     player_history: dict[int, list[dict]],
     team_strength_map: dict[int, int],
     team_name_to_id: dict[str, int] | None = None,
+    team_attack_defence_map: dict[int, dict[str, int]] | None = None,
 ) -> pd.DataFrame:
     """
     Engineer training features from a single gameweek's data.
@@ -219,6 +254,8 @@ def engineer_historical_features(
         player_history: Dict mapping player name to list of prior GW dicts
         team_strength_map: Dict mapping team ID to strength (1-5)
         team_name_to_id: Optional mapping from team name to numeric ID
+        team_attack_defence_map: Optional mapping from team ID to
+            attack/defence strengths
 
     Returns:
         DataFrame with engineered features and actual_points target
@@ -250,6 +287,12 @@ def engineer_historical_features(
             assists_last_3 = calculate_rolling_average(assists_list, 3)
             clean_sheets_last_3 = calculate_rolling_average(cs_list, 3)
             bps_last_3 = calculate_rolling_average(bps_list, 3)
+            ict_list = [float(h.get("ict_index", 0) or 0) for h in history]
+            threat_list = [float(h.get("threat", 0) or 0) for h in history]
+            creativity_list = [float(h.get("creativity", 0) or 0) for h in history]
+            ict_index_last_3 = calculate_rolling_average(ict_list, 3)
+            threat_last_3 = calculate_rolling_average(threat_list, 3)
+            creativity_last_3 = calculate_rolling_average(creativity_list, 3)
         else:
             points_last_3 = 0.0
             points_last_5 = 0.0
@@ -259,6 +302,9 @@ def engineer_historical_features(
             assists_last_3 = 0.0
             clean_sheets_last_3 = 0.0
             bps_last_3 = 0.0
+            ict_index_last_3 = 0.0
+            threat_last_3 = 0.0
+            creativity_last_3 = 0.0
 
         # Opponent strength from team strength map
         opponent_team = int(row.get("opponent_team", 0))
@@ -270,6 +316,24 @@ def engineer_historical_features(
             home_away = 1 if was_home.lower() in ("true", "1", "yes") else 0
         else:
             home_away = 1 if was_home else 0
+
+        # Opponent attack/defence strength (home/away aware)
+        if team_attack_defence_map and opponent_team:
+            ad = team_attack_defence_map.get(opponent_team, {})
+            if home_away == 1:
+                # Player is home, so opponent is away
+                opp_attack_strength = ad.get("attack_away", 1200)
+                opp_defence_strength = ad.get("defence_away", 1200)
+            else:
+                # Player is away, so opponent is home
+                opp_attack_strength = ad.get("attack_home", 1200)
+                opp_defence_strength = ad.get("defence_home", 1200)
+        else:
+            opp_attack_strength = 1200
+            opp_defence_strength = 1200
+
+        # Selected by percent (crowd signal from vaastav CSV)
+        selected_by_percent = float(row.get("selected", 0) or 0)
 
         # Chance of playing: not available historically, default 100
         chance_of_playing = 100
@@ -312,6 +376,12 @@ def engineer_historical_features(
             "assists_last_3": round(assists_last_3, 2),
             "clean_sheets_last_3": round(clean_sheets_last_3, 2),
             "bps_last_3": round(bps_last_3, 2),
+            "ict_index_last_3": round(ict_index_last_3, 2),
+            "threat_last_3": round(threat_last_3, 2),
+            "creativity_last_3": round(creativity_last_3, 2),
+            "opponent_attack_strength": opp_attack_strength,
+            "opponent_defence_strength": opp_defence_strength,
+            "selected_by_percent": selected_by_percent,
             "actual_points": actual_points,
         }
 
@@ -354,6 +424,7 @@ def process_season(
 
     team_strength_map = build_team_strength_map(teams_df)
     team_name_to_id = build_team_name_map(teams_df)
+    team_attack_defence_map = build_team_attack_defence_map(teams_df)
     logger.info(f"Built team strength map with {len(team_strength_map)} teams")
 
     # Fetch all gameweek CSVs
@@ -387,7 +458,12 @@ def process_season(
         if gw >= min_gameweek:
             # Engineer features using accumulated history
             features_df = engineer_historical_features(
-                gw_df, gw, player_history, team_strength_map, team_name_to_id
+                gw_df,
+                gw,
+                player_history,
+                team_strength_map,
+                team_name_to_id,
+                team_attack_defence_map,
             )
 
             if len(features_df) > 0:
@@ -415,6 +491,10 @@ def process_season(
                     "assists": int(row.get("assists", 0)),
                     "clean_sheets": int(row.get("clean_sheets", 0)),
                     "bps": int(row.get("bps", 0)),
+                    "ict_index": float(row.get("ict_index", 0) or 0),
+                    "threat": float(row.get("threat", 0) or 0),
+                    "creativity": float(row.get("creativity", 0) or 0),
+                    "selected": int(row.get("selected", 0) or 0),
                     "round": gw,
                 }
             )
