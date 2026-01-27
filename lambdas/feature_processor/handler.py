@@ -16,6 +16,11 @@ import pandas as pd
 from botocore.exceptions import ClientError
 
 from common.aws_clients import get_s3_client
+from common.feature_config import (
+    FEATURE_COLS,
+    compute_derived_features,
+    compute_rolling_features,
+)
 
 # Configure logging
 logger = logging.getLogger()
@@ -91,46 +96,6 @@ def load_player_histories_from_s3(
     except Exception as e:
         logger.warning(f"Failed to load player histories: {e}")
         return histories
-
-
-def calculate_rolling_average(points_list: List[float], window: int) -> float:
-    """
-    Calculate rolling average of points.
-
-    Args:
-        points_list: List of points (most recent last)
-        window: Number of games to average
-
-    Returns:
-        Rolling average, or average of available data if fewer games exist
-    """
-    if not points_list:
-        return 0.0
-
-    # Take the last `window` games
-    recent = points_list[-window:] if len(points_list) >= window else points_list
-    return sum(recent) / len(recent)
-
-
-def calculate_minutes_pct(history: List[Dict[str, Any]], window: int = 5) -> float:
-    """
-    Calculate minutes played percentage over recent games.
-
-    Args:
-        history: List of gameweek data (most recent last)
-        window: Number of games to consider
-
-    Returns:
-        Average minutes percentage (0-1 scale)
-    """
-    if not history:
-        return 0.0
-
-    recent = history[-window:] if len(history) >= window else history
-    total_minutes = sum(h.get("minutes", 0) for h in recent)
-    max_minutes = 90 * len(recent)
-
-    return total_minutes / max_minutes if max_minutes > 0 else 0.0
 
 
 def get_team_strength(teams: List[Dict], team_id: int) -> int:
@@ -216,43 +181,16 @@ def engineer_features(
         # Get player history if available
         history = player_histories.get(player_id, [])
 
-        # Calculate rolling averages from history
+        # Calculate rolling features from history
         if history:
-            points_list = [h.get("total_points", 0) for h in history]
-            points_last_3 = calculate_rolling_average(points_list, 3)
-            points_last_5 = calculate_rolling_average(points_list, 5)
-            minutes_pct = calculate_minutes_pct(history, 5)
-            goals_list = [h.get("goals_scored", 0) for h in history]
-            assists_list = [h.get("assists", 0) for h in history]
-            cs_list = [h.get("clean_sheets", 0) for h in history]
-            bps_list = [h.get("bps", 0) for h in history]
-            goals_last_3 = calculate_rolling_average(goals_list, 3)
-            assists_last_3 = calculate_rolling_average(assists_list, 3)
-            clean_sheets_last_3 = calculate_rolling_average(cs_list, 3)
-            bps_last_3 = calculate_rolling_average(bps_list, 3)
-            ict_list = [float(h.get("ict_index", 0) or 0) for h in history]
-            threat_list = [float(h.get("threat", 0) or 0) for h in history]
-            creativity_list = [float(h.get("creativity", 0) or 0) for h in history]
-            ict_index_last_3 = calculate_rolling_average(ict_list, 3)
-            threat_last_3 = calculate_rolling_average(threat_list, 3)
-            creativity_last_3 = calculate_rolling_average(creativity_list, 3)
+            rolling = compute_rolling_features(history)
         else:
-            # Fallback to bootstrap form field
+            # Fallback: use bootstrap form for points, zeros for rest
             form = float(player.get("form", 0) or 0)
-            points_last_3 = form
-            points_last_5 = form
-            # Use total minutes divided by expected minutes played
-            total_minutes = player.get("minutes", 0)
-            # Rough estimate: minutes / (gameweek * 90)
-            expected_minutes = max(gameweek * 90, 90)
-            minutes_pct = min(total_minutes / expected_minutes, 1.0)
-            goals_last_3 = 0.0
-            assists_last_3 = 0.0
-            clean_sheets_last_3 = 0.0
-            bps_last_3 = 0.0
-            ict_index_last_3 = 0.0
-            threat_last_3 = 0.0
-            creativity_last_3 = 0.0
+            rolling = {name: 0.0 for name in FEATURE_COLS if "_last_" in name}
+            rolling["points_last_1"] = form
+            rolling["points_last_3"] = form
+            rolling["points_last_5"] = form
 
         # Form score from bootstrap
         form_score = float(player.get("form", 0) or 0)
@@ -270,34 +208,32 @@ def engineer_features(
             get_opponent_info(team_id, fixtures, teams)
         )
 
-        # Interaction feature
-        form_x_difficulty = form_score * opponent_strength
-
-        row = {
-            "player_id": player_id,
-            "player_name": player.get("web_name", ""),
-            "team_id": team_id,
-            "position": player.get("element_type", 0),
-            "gameweek": gameweek,
-            "points_last_3": round(points_last_3, 2),
-            "points_last_5": round(points_last_5, 2),
-            "minutes_pct": round(minutes_pct, 3),
+        # Static features
+        static = {
             "form_score": form_score,
             "opponent_strength": opponent_strength,
             "home_away": home_away,
             "chance_of_playing": chance_of_playing,
-            "form_x_difficulty": round(form_x_difficulty, 2),
-            "goals_last_3": round(goals_last_3, 2),
-            "assists_last_3": round(assists_last_3, 2),
-            "clean_sheets_last_3": round(clean_sheets_last_3, 2),
-            "bps_last_3": round(bps_last_3, 2),
-            "ict_index_last_3": round(ict_index_last_3, 2),
-            "threat_last_3": round(threat_last_3, 2),
-            "creativity_last_3": round(creativity_last_3, 2),
+            "position": player.get("element_type", 0),
             "opponent_attack_strength": opp_attack_strength,
             "opponent_defence_strength": opp_defence_strength,
             "selected_by_percent": selected_by_percent,
+            "now_cost": player.get("now_cost", 0),
         }
+
+        # Derived features
+        derived = compute_derived_features(history, rolling, static)
+
+        # Build row from rolling + static + derived
+        row = {
+            "player_id": player_id,
+            "player_name": player.get("web_name", ""),
+            "team_id": team_id,
+            "gameweek": gameweek,
+        }
+        row.update(rolling)
+        row.update(static)
+        row.update(derived)
 
         # Add actual points for historical mode (training target)
         if mode == "historical" and history:

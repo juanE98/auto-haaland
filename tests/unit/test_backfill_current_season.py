@@ -4,9 +4,8 @@ Unit tests for the current season backfill script.
 
 import pytest
 
+from lambdas.common.feature_config import FEATURE_COLS
 from scripts.backfill_current_season import (
-    calculate_minutes_pct,
-    calculate_rolling_average,
     engineer_backfill_features,
     filter_history_before_gameweek,
     get_finished_gameweeks,
@@ -207,33 +206,73 @@ class TestEngineerBackfillFeatures:
                     "round": 1,
                     "total_points": 6,
                     "minutes": 90,
+                    "goals_scored": 1,
+                    "assists": 0,
+                    "clean_sheets": 0,
+                    "bps": 22,
                     "ict_index": "85.3",
                     "threat": "45.0",
                     "creativity": "55.0",
+                    "influence": "30.0",
+                    "bonus": 2,
+                    "yellow_cards": 0,
+                    "saves": 0,
+                    "transfers_in": 5000,
+                    "transfers_out": 2000,
                 },
                 {
                     "round": 2,
                     "total_points": 8,
                     "minutes": 80,
+                    "goals_scored": 0,
+                    "assists": 1,
+                    "clean_sheets": 0,
+                    "bps": 18,
                     "ict_index": "72.1",
                     "threat": "38.0",
                     "creativity": "48.0",
+                    "influence": "25.0",
+                    "bonus": 0,
+                    "yellow_cards": 1,
+                    "saves": 0,
+                    "transfers_in": 3000,
+                    "transfers_out": 4000,
                 },
                 {
                     "round": 3,
                     "total_points": 4,
                     "minutes": 90,
+                    "goals_scored": 0,
+                    "assists": 1,
+                    "clean_sheets": 1,
+                    "bps": 35,
                     "ict_index": "92.0",
                     "threat": "60.0",
                     "creativity": "30.0",
+                    "influence": "40.0",
+                    "bonus": 3,
+                    "yellow_cards": 0,
+                    "saves": 0,
+                    "transfers_in": 8000,
+                    "transfers_out": 1000,
                 },
                 {
                     "round": 4,
                     "total_points": 10,
                     "minutes": 90,
+                    "goals_scored": 1,
+                    "assists": 1,
+                    "clean_sheets": 0,
+                    "bps": 30,
                     "ict_index": "88.0",
                     "threat": "55.0",
                     "creativity": "40.0",
+                    "influence": "35.0",
+                    "bonus": 2,
+                    "yellow_cards": 0,
+                    "saves": 0,
+                    "transfers_in": 10000,
+                    "transfers_out": 1000,
                 },
             ],
             200: [
@@ -241,33 +280,73 @@ class TestEngineerBackfillFeatures:
                     "round": 1,
                     "total_points": 12,
                     "minutes": 90,
+                    "goals_scored": 2,
+                    "assists": 0,
+                    "clean_sheets": 0,
+                    "bps": 40,
                     "ict_index": "95.0",
                     "threat": "70.0",
                     "creativity": "25.0",
+                    "influence": "45.0",
+                    "bonus": 3,
+                    "yellow_cards": 0,
+                    "saves": 0,
+                    "transfers_in": 15000,
+                    "transfers_out": 500,
                 },
                 {
                     "round": 2,
                     "total_points": 2,
                     "minutes": 60,
+                    "goals_scored": 0,
+                    "assists": 0,
+                    "clean_sheets": 0,
+                    "bps": 10,
                     "ict_index": "40.0",
                     "threat": "20.0",
                     "creativity": "18.0",
+                    "influence": "15.0",
+                    "bonus": 0,
+                    "yellow_cards": 1,
+                    "saves": 0,
+                    "transfers_in": 2000,
+                    "transfers_out": 8000,
                 },
                 {
                     "round": 3,
                     "total_points": 7,
                     "minutes": 90,
+                    "goals_scored": 1,
+                    "assists": 0,
+                    "clean_sheets": 0,
+                    "bps": 25,
                     "ict_index": "78.0",
                     "threat": "50.0",
                     "creativity": "30.0",
+                    "influence": "32.0",
+                    "bonus": 1,
+                    "yellow_cards": 0,
+                    "saves": 0,
+                    "transfers_in": 7000,
+                    "transfers_out": 3000,
                 },
                 {
                     "round": 4,
                     "total_points": 5,
                     "minutes": 75,
+                    "goals_scored": 0,
+                    "assists": 1,
+                    "clean_sheets": 0,
+                    "bps": 18,
                     "ict_index": "62.0",
                     "threat": "35.0",
                     "creativity": "28.0",
+                    "influence": "22.0",
+                    "bonus": 0,
+                    "yellow_cards": 0,
+                    "saves": 0,
+                    "transfers_in": 4000,
+                    "transfers_out": 5000,
                 },
             ],
         }
@@ -351,52 +430,7 @@ class TestEngineerBackfillFeatures:
             gameweek=4,
         )
 
-        expected_cols = {
-            "player_id",
-            "player_name",
-            "team_id",
-            "position",
-            "gameweek",
-            "points_last_3",
-            "points_last_5",
-            "minutes_pct",
-            "form_score",
-            "opponent_strength",
-            "home_away",
-            "chance_of_playing",
-            "form_x_difficulty",
-            "goals_last_3",
-            "assists_last_3",
-            "clean_sheets_last_3",
-            "bps_last_3",
-            "ict_index_last_3",
-            "threat_last_3",
-            "creativity_last_3",
-            "opponent_attack_strength",
-            "opponent_defence_strength",
-            "selected_by_percent",
-            "actual_points",
-        }
+        # Metadata columns + feature columns + target
+        metadata_cols = {"player_id", "player_name", "team_id", "gameweek"}
+        expected_cols = metadata_cols | set(FEATURE_COLS) | {"actual_points"}
         assert set(result.columns) == expected_cols
-
-
-# === Rolling Calculations ===
-
-
-@pytest.mark.unit
-class TestRollingCalculations:
-    def test_rolling_average_basic(self):
-        assert calculate_rolling_average([2.0, 4.0, 6.0], 3) == pytest.approx(4.0)
-
-    def test_rolling_average_empty(self):
-        assert calculate_rolling_average([], 3) == 0.0
-
-    def test_minutes_pct_full(self):
-        history = [
-            {"minutes": 90},
-            {"minutes": 90},
-        ]
-        assert calculate_minutes_pct(history, 5) == pytest.approx(1.0)
-
-    def test_minutes_pct_empty(self):
-        assert calculate_minutes_pct([], 5) == 0.0

@@ -23,6 +23,11 @@ import pandas as pd
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from lambdas.common.feature_config import (  # noqa: E402
+    FEATURE_COLS,
+    compute_derived_features,
+    compute_rolling_features,
+)
 from lambdas.common.fpl_api import FPLApiClient  # noqa: E402
 
 logging.basicConfig(
@@ -30,29 +35,6 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
-
-# Feature columns matching the feature processor output
-FEATURE_COLS = [
-    "points_last_3",
-    "points_last_5",
-    "minutes_pct",
-    "form_score",
-    "opponent_strength",
-    "home_away",
-    "chance_of_playing",
-    "form_x_difficulty",
-    "position",
-    "goals_last_3",
-    "assists_last_3",
-    "clean_sheets_last_3",
-    "bps_last_3",
-    "ict_index_last_3",
-    "threat_last_3",
-    "creativity_last_3",
-    "opponent_attack_strength",
-    "opponent_defence_strength",
-    "selected_by_percent",
-]
 
 # Batch size for player summary API calls
 BATCH_SIZE = 50
@@ -191,24 +173,6 @@ def get_gameweek_entry(history: list[dict], gameweek: int) -> dict | None:
     return entries[0] if entries else None
 
 
-def calculate_rolling_average(values: list[float], window: int) -> float:
-    """Calculate rolling average over the last `window` values."""
-    if not values:
-        return 0.0
-    recent = values[-window:] if len(values) >= window else values
-    return sum(recent) / len(recent)
-
-
-def calculate_minutes_pct(history: list[dict], window: int = 5) -> float:
-    """Calculate minutes played percentage over recent games."""
-    if not history:
-        return 0.0
-    recent = history[-window:] if len(history) >= window else history
-    total_minutes = sum(h.get("minutes", 0) for h in recent)
-    max_minutes = 90 * len(recent)
-    return total_minutes / max_minutes if max_minutes > 0 else 0.0
-
-
 def get_fixture_info(
     player_team_id: int,
     fixtures: list[dict],
@@ -298,39 +262,11 @@ def engineer_backfill_features(
 
         # Calculate rolling features from prior history
         if prior_history:
-            points_list = [h.get("total_points", 0) for h in prior_history]
-            points_last_3 = calculate_rolling_average(points_list, 3)
-            points_last_5 = calculate_rolling_average(points_list, 5)
-            minutes_pct = calculate_minutes_pct(prior_history, 5)
-            form_score = points_last_5
-            goals_list = [h.get("goals_scored", 0) for h in prior_history]
-            assists_list = [h.get("assists", 0) for h in prior_history]
-            cs_list = [h.get("clean_sheets", 0) for h in prior_history]
-            bps_list = [h.get("bps", 0) for h in prior_history]
-            goals_last_3 = calculate_rolling_average(goals_list, 3)
-            assists_last_3 = calculate_rolling_average(assists_list, 3)
-            clean_sheets_last_3 = calculate_rolling_average(cs_list, 3)
-            bps_last_3 = calculate_rolling_average(bps_list, 3)
-            ict_list = [float(h.get("ict_index", 0) or 0) for h in prior_history]
-            threat_list = [float(h.get("threat", 0) or 0) for h in prior_history]
-            creativity_list = [
-                float(h.get("creativity", 0) or 0) for h in prior_history
-            ]
-            ict_index_last_3 = calculate_rolling_average(ict_list, 3)
-            threat_last_3 = calculate_rolling_average(threat_list, 3)
-            creativity_last_3 = calculate_rolling_average(creativity_list, 3)
+            rolling = compute_rolling_features(prior_history)
+            form_score = rolling.get("points_last_5", 0.0)
         else:
-            points_last_3 = 0.0
-            points_last_5 = 0.0
-            minutes_pct = 0.0
+            rolling = {name: 0.0 for name in FEATURE_COLS if "_last_" in name}
             form_score = 0.0
-            goals_last_3 = 0.0
-            assists_last_3 = 0.0
-            clean_sheets_last_3 = 0.0
-            bps_last_3 = 0.0
-            ict_index_last_3 = 0.0
-            threat_last_3 = 0.0
-            creativity_last_3 = 0.0
 
         # Opponent info from fixtures
         opponent_strength, home_away, opp_attack_strength, opp_defence_strength = (
@@ -345,35 +281,33 @@ def engineer_backfill_features(
         # Chance of playing: not reliably available historically
         chance_of_playing = 100
 
-        # Interaction feature
-        form_x_difficulty = form_score * opponent_strength
-
-        feature_row = {
-            "player_id": player_id,
-            "player_name": player.get("web_name", ""),
-            "team_id": team_id,
-            "position": player.get("element_type", 0),
-            "gameweek": gameweek,
-            "points_last_3": round(points_last_3, 2),
-            "points_last_5": round(points_last_5, 2),
-            "minutes_pct": round(minutes_pct, 3),
+        # Static features
+        static = {
             "form_score": round(form_score, 2),
             "opponent_strength": opponent_strength,
             "home_away": home_away,
             "chance_of_playing": chance_of_playing,
-            "form_x_difficulty": round(form_x_difficulty, 2),
-            "goals_last_3": round(goals_last_3, 2),
-            "assists_last_3": round(assists_last_3, 2),
-            "clean_sheets_last_3": round(clean_sheets_last_3, 2),
-            "bps_last_3": round(bps_last_3, 2),
-            "ict_index_last_3": round(ict_index_last_3, 2),
-            "threat_last_3": round(threat_last_3, 2),
-            "creativity_last_3": round(creativity_last_3, 2),
+            "position": player.get("element_type", 0),
             "opponent_attack_strength": opp_attack_strength,
             "opponent_defence_strength": opp_defence_strength,
             "selected_by_percent": selected_by_percent,
-            "actual_points": actual_points,
+            "now_cost": player.get("now_cost", 0),
         }
+
+        # Derived features
+        derived = compute_derived_features(prior_history, rolling, static)
+
+        # Build feature row
+        feature_row = {
+            "player_id": player_id,
+            "player_name": player.get("web_name", ""),
+            "team_id": team_id,
+            "gameweek": gameweek,
+        }
+        feature_row.update(rolling)
+        feature_row.update(static)
+        feature_row.update(derived)
+        feature_row["actual_points"] = actual_points
 
         features.append(feature_row)
 
