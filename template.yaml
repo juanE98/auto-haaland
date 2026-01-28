@@ -218,6 +218,11 @@ Resources:
     Properties:
       Name: !Sub "fpl-api-${Environment}"
       StageName: !Ref Environment
+      MethodSettings:
+        - ResourcePath: "/*"
+          HttpMethod: "*"
+          ThrottlingBurstLimit: 100
+          ThrottlingRateLimit: 50
       Cors:
         AllowOrigin: "'*'"
         AllowHeaders: "'Content-Type'"
