@@ -34,10 +34,16 @@ SM_CHANNEL_TRAINING = os.environ.get(
 SM_MODEL_DIR = os.environ.get("SM_MODEL_DIR", "/opt/ml/model")
 SM_OUTPUT_DATA_DIR = os.environ.get("SM_OUTPUT_DATA_DIR", "/opt/ml/output/data")
 
+# Feature version - must match lambdas/common/feature_config.py FEATURE_VERSION
+FEATURE_VERSION = "2.3.0"
+
 # Feature columns (must match feature processor output)
 # Keep in sync with lambdas/common/feature_config.py
+# Total: 73 rolling + 9 static + 32 bootstrap + 28 team + 24 opponent
+#        + 16 fixture + 8 position + 5 interaction + 5 derived = 200
 FEATURE_COLS = [
-    # Rolling features (36 total: 10 stats x 3 windows + 3 stats x 2 windows)
+    # Rolling features (73 total)
+    # Core stats with standard windows (1, 3, 5)
     "points_last_1",
     "points_last_3",
     "points_last_5",
@@ -68,12 +74,54 @@ FEATURE_COLS = [
     "bonus_last_1",
     "bonus_last_3",
     "bonus_last_5",
+    # New xG/xA stats with standard windows (1, 3, 5)
+    "expected_goals_last_1",
+    "expected_goals_last_3",
+    "expected_goals_last_5",
+    "expected_assists_last_1",
+    "expected_assists_last_3",
+    "expected_assists_last_5",
+    # New minutes/starts stats with standard windows (1, 3, 5)
+    "minutes_last_1",
+    "minutes_last_3",
+    "minutes_last_5",
+    "starts_last_1",
+    "starts_last_3",
+    "starts_last_5",
+    # Stats with medium/long windows (3, 5)
     "yellow_cards_last_3",
     "yellow_cards_last_5",
     "saves_last_3",
     "saves_last_5",
     "transfers_balance_last_3",
     "transfers_balance_last_5",
+    # New rarer event stats with longer windows (3, 5, 10)
+    "red_cards_last_3",
+    "red_cards_last_5",
+    "red_cards_last_10",
+    "own_goals_last_3",
+    "own_goals_last_5",
+    "own_goals_last_10",
+    "penalties_saved_last_3",
+    "penalties_saved_last_5",
+    "penalties_saved_last_10",
+    "penalties_missed_last_3",
+    "penalties_missed_last_5",
+    "penalties_missed_last_10",
+    # Extended window (10) for key existing stats
+    "points_last_10",
+    "goals_last_10",
+    "assists_last_10",
+    "clean_sheets_last_10",
+    "bps_last_10",
+    "ict_index_last_10",
+    "threat_last_10",
+    "creativity_last_10",
+    "influence_last_10",
+    "bonus_last_10",
+    "yellow_cards_last_10",
+    "saves_last_10",
+    "transfers_balance_last_10",
     # Static features (9 total)
     "form_score",
     "opponent_strength",
@@ -84,6 +132,145 @@ FEATURE_COLS = [
     "opponent_defence_strength",
     "selected_by_percent",
     "now_cost",
+    # Bootstrap features (32 total) - Phase 2
+    # FPL Expected Points & Value (8)
+    "ep_this",
+    "ep_next",
+    "points_per_game",
+    "value_form",
+    "value_season",
+    "cost_change_start",
+    "cost_change_event",
+    "cost_change_event_fall",
+    # Availability & Status (6)
+    "status_available",
+    "status_injured",
+    "status_suspended",
+    "status_doubtful",
+    "has_news",
+    "news_injury_flag",
+    # Dream Team & Recognition (4)
+    "dreamteam_count",
+    "in_dreamteam",
+    "dreamteam_rate",
+    "bonus_rate",
+    # Transfer Momentum (6)
+    "transfers_in_event",
+    "transfers_out_event",
+    "net_transfers_event",
+    "transfer_momentum",
+    "transfers_in_rank",
+    "ownership_change_rate",
+    # Set Piece Responsibility (4)
+    "corners_and_indirect_freekicks_order",
+    "direct_freekicks_order",
+    "penalties_order",
+    "set_piece_taker",
+    # Season Totals Normalised (4)
+    "total_points_rank_pct",
+    "goals_per_90_season",
+    "assists_per_90_season",
+    "ict_per_90_season",
+    # Team context features (28 total) - Phase 3
+    # Team form (10)
+    "team_goals_scored_last_3",
+    "team_goals_scored_last_5",
+    "team_goals_conceded_last_3",
+    "team_goals_conceded_last_5",
+    "team_clean_sheets_last_3",
+    "team_clean_sheets_last_5",
+    "team_wins_last_3",
+    "team_wins_last_5",
+    "team_form_score",
+    "team_form_trend",
+    # Team strength (8)
+    "team_strength_overall",
+    "team_strength_attack_home",
+    "team_strength_attack_away",
+    "team_strength_defence_home",
+    "team_strength_defence_away",
+    "team_attack_vs_opp_defence",
+    "team_defence_vs_opp_attack",
+    "strength_differential",
+    # League position (4)
+    "team_league_position",
+    "team_points",
+    "team_goal_difference",
+    "team_position_change_last_5",
+    # Player context (6)
+    "team_total_points_avg",
+    "player_share_of_team_points",
+    "player_share_of_team_goals",
+    "team_avg_ict",
+    "team_players_available",
+    "squad_depth_at_position",
+    # Opponent analysis features (24 total) - Phase 3
+    # Defensive vulnerability (12)
+    "opp_goals_conceded_last_3",
+    "opp_goals_conceded_last_5",
+    "opp_clean_sheets_last_3",
+    "opp_clean_sheets_last_5",
+    "opp_clean_sheets_rate",
+    "opp_goals_conceded_home",
+    "opp_goals_conceded_away",
+    "opp_xgc_per_90",
+    "opp_defensive_errors_last_5",
+    "opp_saves_rate",
+    "opp_big_chances_conceded_last_5",
+    "opp_defensive_rating",
+    # Attacking threat (8)
+    "opp_goals_scored_last_3",
+    "opp_goals_scored_last_5",
+    "opp_xg_per_90",
+    "opp_shots_on_target_last_5",
+    "opp_big_chances_last_5",
+    "opp_goals_scored_home",
+    "opp_goals_scored_away",
+    "opp_attacking_rating",
+    # Context (4)
+    "opp_league_position",
+    "opp_form_score",
+    "opp_days_rest",
+    "opp_fixture_congestion",
+    # Fixture context features (16 total) - Phase 4
+    # Difficulty (6)
+    "fdr_current",
+    "fdr_next_3_avg",
+    "fdr_next_5_avg",
+    "fixture_swing",
+    "is_tough_fixture",
+    "is_easy_fixture",
+    # DGW/BGW (4)
+    "is_double_gameweek",
+    "is_blank_gameweek",
+    "dgw_fixture_count",
+    "next_is_dgw",
+    # Timing (6)
+    "days_since_last_game",
+    "fixture_congestion_7d",
+    "fixture_congestion_14d",
+    "kickoff_hour",
+    "is_weekend_game",
+    "is_evening_kickoff",
+    # Position-specific features (8 total) - Phase 4
+    # GK (2)
+    "gk_saves_per_90",
+    "gk_penalty_save_rate",
+    # DEF (2)
+    "def_clean_sheet_rate",
+    "def_goal_involvement",
+    # MID (2)
+    "mid_goal_involvement_rate",
+    "mid_creativity_threat_ratio",
+    # FWD (2)
+    "fwd_shots_per_90",
+    "fwd_conversion_rate",
+    # Interaction features (5 total) - Phase 4
+    "form_x_fixture_difficulty",
+    "ict_x_minutes",
+    "ownership_x_form",
+    "value_x_form",
+    "momentum_score",
     # Derived features (5 total)
     "minutes_pct",
     "form_x_difficulty",

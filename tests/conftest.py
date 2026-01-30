@@ -41,7 +41,7 @@ def s3_resource(aws_credentials):
     """Create a mocked S3 resource with the fpl-ml-data bucket."""
     with mock_aws():
         resource = boto3.resource("s3", region_name="ap-southeast-2")
-        bucket = resource.create_bucket(
+        resource.create_bucket(
             Bucket="fpl-ml-data",
             CreateBucketConfiguration={"LocationConstraint": "ap-southeast-2"},
         )
@@ -231,3 +231,272 @@ def sample_features_dataframe():
             "form_x_difficulty": [25.5, 23.2, 15.8],
         }
     )
+
+
+# === Feature DataFrame Generator ===
+
+
+def generate_training_dataframe(n_samples: int = 10):
+    """
+    Generate a valid training DataFrame with all required feature columns.
+
+    This generates synthetic data for all features defined in FEATURE_COLS,
+    making tests resilient to feature changes.
+
+    Args:
+        n_samples: Number of sample rows to generate
+
+    Returns:
+        DataFrame with all FEATURE_COLS plus actual_points target
+    """
+    import numpy as np
+    import pandas as pd
+
+    from lambdas.common.feature_config import FEATURE_COLS, TARGET_COL
+
+    np.random.seed(42)
+    data = {}
+
+    for col in FEATURE_COLS:
+        # Generate appropriate random data based on feature name
+        if "last_" in col:
+            # Rolling features - small positive numbers
+            if "transfers_balance" in col:
+                data[col] = np.random.randint(-5000, 10000, n_samples).astype(float)
+            elif any(
+                x in col
+                for x in [
+                    "goals",
+                    "assists",
+                    "clean_sheets",
+                    "bonus",
+                    "yellow_cards",
+                    "red_cards",
+                    "own_goals",
+                    "penalties_saved",
+                    "penalties_missed",
+                    "starts",
+                ]
+            ):
+                data[col] = np.random.uniform(0, 2, n_samples)
+            elif "expected" in col:
+                data[col] = np.random.uniform(0, 1.5, n_samples)
+            elif "minutes" in col:
+                data[col] = np.random.uniform(0, 90, n_samples)
+            elif any(
+                x in col for x in ["ict_index", "threat", "creativity", "influence"]
+            ):
+                data[col] = np.random.uniform(0, 100, n_samples)
+            elif "bps" in col:
+                data[col] = np.random.uniform(0, 40, n_samples)
+            elif "saves" in col:
+                data[col] = np.random.uniform(0, 5, n_samples)
+            else:
+                # points_last_* etc
+                data[col] = np.random.uniform(0, 15, n_samples)
+        elif col == "form_score":
+            data[col] = np.random.uniform(0, 10, n_samples)
+        elif col == "opponent_strength":
+            data[col] = np.random.randint(1, 6, n_samples)
+        elif col == "home_away":
+            data[col] = np.random.randint(0, 2, n_samples)
+        elif col == "chance_of_playing":
+            data[col] = np.random.choice([0, 25, 50, 75, 100], n_samples)
+        elif col == "position":
+            data[col] = np.random.randint(1, 5, n_samples)
+        elif col in ["opponent_attack_strength", "opponent_defence_strength"]:
+            data[col] = np.random.randint(1000, 1500, n_samples)
+        elif col == "selected_by_percent":
+            data[col] = np.random.uniform(0, 100, n_samples)
+        elif col == "now_cost":
+            data[col] = np.random.randint(40, 150, n_samples)
+        elif col == "minutes_pct":
+            data[col] = np.random.uniform(0, 1, n_samples)
+        elif col == "form_x_difficulty":
+            data[col] = np.random.uniform(0, 50, n_samples)
+        elif col == "points_per_90":
+            data[col] = np.random.uniform(0, 10, n_samples)
+        elif col == "goal_contributions_last_3":
+            data[col] = np.random.uniform(0, 3, n_samples)
+        elif col == "points_volatility":
+            data[col] = np.random.uniform(0, 5, n_samples)
+        # Bootstrap features (Phase 2)
+        elif col in ["ep_this", "ep_next", "points_per_game"]:
+            data[col] = np.random.uniform(0, 10, n_samples)
+        elif col in ["value_form", "value_season"]:
+            data[col] = np.random.uniform(0, 2, n_samples)
+        elif col.startswith("cost_change"):
+            data[col] = np.random.randint(-20, 20, n_samples).astype(float)
+        elif col.startswith("status_") or col in [
+            "has_news",
+            "news_injury_flag",
+            "in_dreamteam",
+            "set_piece_taker",
+        ]:
+            data[col] = np.random.randint(0, 2, n_samples).astype(float)
+        elif col == "dreamteam_count":
+            data[col] = np.random.randint(0, 5, n_samples).astype(float)
+        elif col in ["dreamteam_rate", "bonus_rate"]:
+            data[col] = np.random.uniform(0, 1, n_samples)
+        elif col in ["transfers_in_event", "transfers_out_event"]:
+            data[col] = np.random.randint(0, 100000, n_samples).astype(float)
+        elif col == "net_transfers_event":
+            data[col] = np.random.randint(-50000, 50000, n_samples).astype(float)
+        elif col == "transfer_momentum":
+            data[col] = np.random.uniform(-1, 1, n_samples)
+        elif col == "transfers_in_rank":
+            data[col] = np.random.randint(1, 500, n_samples).astype(float)
+        elif col == "ownership_change_rate":
+            data[col] = np.random.uniform(-5, 5, n_samples)
+        elif col.endswith("_order"):
+            data[col] = np.random.choice([0, 1, 2, 3, 4, 5], n_samples).astype(float)
+        elif col == "total_points_rank_pct":
+            data[col] = np.random.uniform(0, 100, n_samples)
+        elif col.endswith("_per_90_season"):
+            data[col] = np.random.uniform(0, 1, n_samples)
+        # Team features (Phase 3)
+        elif col.startswith("team_goals_") or col.startswith("team_clean_sheets"):
+            data[col] = np.random.uniform(0, 3, n_samples)
+        elif col.startswith("team_wins"):
+            data[col] = np.random.uniform(0, 1, n_samples)
+        elif col == "team_form_score":
+            data[col] = np.random.randint(0, 15, n_samples).astype(float)
+        elif col == "team_form_trend":
+            data[col] = np.random.uniform(-5, 5, n_samples)
+        elif col.startswith("team_strength"):
+            data[col] = np.random.randint(1000, 1500, n_samples).astype(float)
+        elif col in ["team_attack_vs_opp_defence", "team_defence_vs_opp_attack"]:
+            data[col] = np.random.uniform(0.8, 1.2, n_samples)
+        elif col == "strength_differential":
+            data[col] = np.random.uniform(-500, 500, n_samples)
+        elif col == "team_league_position":
+            data[col] = np.random.randint(1, 21, n_samples).astype(float)
+        elif col == "team_points":
+            data[col] = np.random.randint(0, 100, n_samples).astype(float)
+        elif col == "team_goal_difference":
+            data[col] = np.random.randint(-30, 50, n_samples).astype(float)
+        elif col == "team_position_change_last_5":
+            data[col] = np.random.randint(-5, 5, n_samples).astype(float)
+        elif col == "team_total_points_avg":
+            data[col] = np.random.uniform(30, 100, n_samples)
+        elif col.startswith("player_share_"):
+            data[col] = np.random.uniform(0, 0.3, n_samples)
+        elif col == "team_avg_ict":
+            data[col] = np.random.uniform(50, 150, n_samples)
+        elif col == "team_players_available":
+            data[col] = np.random.randint(15, 25, n_samples).astype(float)
+        elif col == "squad_depth_at_position":
+            data[col] = np.random.randint(2, 6, n_samples).astype(float)
+        # Opponent features (Phase 3)
+        elif col.startswith("opp_goals_"):
+            data[col] = np.random.uniform(0, 3, n_samples)
+        elif col.startswith("opp_clean_sheets"):
+            data[col] = np.random.uniform(0, 1, n_samples)
+        elif col in ["opp_xgc_per_90", "opp_xg_per_90"]:
+            data[col] = np.random.uniform(0.5, 2.5, n_samples)
+        elif col == "opp_defensive_errors_last_5":
+            data[col] = np.random.randint(0, 3, n_samples).astype(float)
+        elif col == "opp_saves_rate":
+            data[col] = np.random.uniform(0.5, 0.9, n_samples)
+        elif col.startswith("opp_big_chances"):
+            data[col] = np.random.uniform(0, 5, n_samples)
+        elif col in ["opp_defensive_rating", "opp_attacking_rating"]:
+            data[col] = np.random.uniform(0, 15, n_samples)
+        elif col == "opp_shots_on_target_last_5":
+            data[col] = np.random.uniform(0, 20, n_samples)
+        elif col == "opp_league_position":
+            data[col] = np.random.randint(1, 21, n_samples).astype(float)
+        elif col == "opp_form_score":
+            data[col] = np.random.randint(0, 15, n_samples).astype(float)
+        elif col == "opp_days_rest":
+            data[col] = np.random.randint(2, 10, n_samples).astype(float)
+        elif col == "opp_fixture_congestion":
+            data[col] = np.random.randint(1, 5, n_samples).astype(float)
+        # Fixture features (Phase 4)
+        elif col == "fdr_current":
+            data[col] = np.random.randint(1, 6, n_samples).astype(float)
+        elif col in ["fdr_next_3_avg", "fdr_next_5_avg"]:
+            data[col] = np.random.uniform(1, 5, n_samples)
+        elif col == "fixture_swing":
+            data[col] = np.random.uniform(-3, 3, n_samples)
+        elif col in [
+            "is_tough_fixture",
+            "is_easy_fixture",
+            "is_double_gameweek",
+            "is_blank_gameweek",
+            "next_is_dgw",
+            "is_weekend_game",
+            "is_evening_kickoff",
+        ]:
+            data[col] = np.random.randint(0, 2, n_samples).astype(float)
+        elif col == "dgw_fixture_count":
+            data[col] = np.random.choice([0, 1, 2], n_samples).astype(float)
+        elif col == "days_since_last_game":
+            data[col] = np.random.randint(3, 10, n_samples).astype(float)
+        elif col == "fixture_congestion_7d":
+            data[col] = np.random.randint(0, 3, n_samples).astype(float)
+        elif col == "fixture_congestion_14d":
+            data[col] = np.random.randint(1, 5, n_samples).astype(float)
+        elif col == "kickoff_hour":
+            data[col] = np.random.choice([12, 14, 15, 17, 20], n_samples).astype(float)
+        # Position-specific features (Phase 4)
+        elif col.startswith("gk_"):
+            data[col] = np.random.uniform(0, 5, n_samples)
+        elif col.startswith("def_"):
+            data[col] = np.random.uniform(0, 1, n_samples)
+        elif col.startswith("mid_"):
+            data[col] = np.random.uniform(0, 2, n_samples)
+        elif col.startswith("fwd_"):
+            data[col] = np.random.uniform(0, 3, n_samples)
+        # Interaction features (Phase 4)
+        elif col == "form_x_fixture_difficulty":
+            data[col] = np.random.uniform(0, 50, n_samples)
+        elif col == "ict_x_minutes":
+            data[col] = np.random.uniform(0, 100, n_samples)
+        elif col == "ownership_x_form":
+            data[col] = np.random.uniform(0, 500, n_samples)
+        elif col == "value_x_form":
+            data[col] = np.random.uniform(0, 100, n_samples)
+        elif col == "momentum_score":
+            data[col] = np.random.uniform(-10, 10, n_samples)
+        else:
+            # Default fallback
+            data[col] = np.random.uniform(0, 10, n_samples)
+
+    # Add target column
+    data[TARGET_COL] = np.random.randint(0, 15, n_samples)
+
+    return pd.DataFrame(data)
+
+
+@pytest.fixture
+def training_dataframe_10():
+    """Generate a training DataFrame with 10 samples and all features."""
+    return generate_training_dataframe(10)
+
+
+@pytest.fixture
+def training_dataframe_5():
+    """Generate a training DataFrame with 5 samples and all features."""
+    return generate_training_dataframe(5)
+
+
+@pytest.fixture
+def training_dataframe_100():
+    """Generate a training DataFrame with 100 samples and all features."""
+    return generate_training_dataframe(100)
+
+
+@pytest.fixture
+def inference_features_df():
+    """Generate a features DataFrame for inference testing (no target column)."""
+    from lambdas.common.feature_config import TARGET_COL
+
+    df = generate_training_dataframe(3)
+    # Remove target and add metadata columns
+    df = df.drop(columns=[TARGET_COL])
+    df["player_id"] = [100, 200, 300]
+    df["player_name"] = ["Salah", "Haaland", "Saka"]
+    df["team_id"] = [10, 5, 1]
+    df["gameweek"] = [20, 20, 20]
+    return df
