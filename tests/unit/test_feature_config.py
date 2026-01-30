@@ -3,6 +3,9 @@ Unit tests for the feature configuration module.
 """
 
 import math
+import os
+import re
+from pathlib import Path
 
 import pytest
 
@@ -710,3 +713,47 @@ class TestComputeBootstrapFeatures:
         result = compute_bootstrap_features(sample_player, prev_ownership=42.0)
         # 45.3 - 42.0 = 3.3
         assert result["ownership_change_rate"] == pytest.approx(3.3, abs=0.01)
+
+
+# === Lambda Import Validation ===
+
+
+@pytest.mark.unit
+class TestLambdaImports:
+    """
+    Ensure imports in lambdas/ directory are Lambda-compatible.
+
+    Lambda functions have a different directory structure than local development.
+    Imports using 'from lambdas.common...' will fail in Lambda because the
+    'lambdas' package doesn't exist in the Lambda environment.
+    """
+
+    def test_no_lambdas_prefix_imports(self):
+        """
+        Verify no Python files in lambdas/ use 'from lambdas.' imports.
+
+        These imports work locally but fail in Lambda deployment because
+        the directory structure is different.
+        """
+        lambdas_dir = Path(__file__).parent.parent.parent / "lambdas"
+        assert lambdas_dir.exists(), f"lambdas directory not found at {lambdas_dir}"
+
+        # Pattern to match problematic imports
+        bad_import_pattern = re.compile(
+            r"^\s*(from\s+lambdas\.|import\s+lambdas\.)", re.MULTILINE
+        )
+
+        violations = []
+
+        for py_file in lambdas_dir.rglob("*.py"):
+            content = py_file.read_text()
+            matches = bad_import_pattern.findall(content)
+            if matches:
+                rel_path = py_file.relative_to(lambdas_dir)
+                violations.append(f"{rel_path}: {matches}")
+
+        assert not violations, (
+            "Found imports using 'lambdas.' prefix which will fail in Lambda:\n"
+            + "\n".join(violations)
+            + "\n\nUse 'from common.' instead of 'from lambdas.common.'"
+        )
