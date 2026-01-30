@@ -6,6 +6,7 @@
       "Type": "Task",
       "Resource": "${DataFetcherFunctionArn}",
       "Parameters": {
+        "gameweek.$": "$.gameweek",
         "fetch_player_details": true
       },
       "ResultPath": "$.fetchResult",
