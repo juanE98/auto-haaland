@@ -6,9 +6,16 @@ import math
 
 import pytest
 
+from lambdas.common.feature_categories.fixture_features import FIXTURE_FEATURES
+from lambdas.common.feature_categories.interaction_features import INTERACTION_FEATURES
+from lambdas.common.feature_categories.opponent_features import OPPONENT_FEATURES
+from lambdas.common.feature_categories.position_features import POSITION_FEATURES
+from lambdas.common.feature_categories.team_features import TEAM_FEATURES
 from lambdas.common.feature_config import (
+    BOOTSTRAP_FEATURES,
     DERIVED_FEATURES,
     FEATURE_COLS,
+    FEATURE_VERSION,
     ROLLING_FEATURE_NAMES,
     ROLLING_STATS,
     STATIC_FEATURES,
@@ -16,6 +23,7 @@ from lambdas.common.feature_config import (
     calculate_minutes_pct,
     calculate_rolling_average,
     calculate_rolling_stddev,
+    compute_bootstrap_features,
     compute_derived_features,
     compute_rolling_features,
     extract_values,
@@ -26,29 +34,63 @@ from lambdas.common.feature_config import (
 
 @pytest.mark.unit
 class TestFeatureList:
-    def test_feature_cols_has_50_entries(self):
-        """FEATURE_COLS should contain exactly 50 features."""
-        assert len(FEATURE_COLS) == 50
+    def test_feature_cols_has_200_entries(self):
+        """FEATURE_COLS should contain exactly 200 features (Phase 4)."""
+        assert len(FEATURE_COLS) == 200
 
     def test_no_duplicate_feature_names(self):
         """All feature names should be unique."""
         assert len(FEATURE_COLS) == len(set(FEATURE_COLS))
 
     def test_rolling_feature_names_count(self):
-        """Rolling features: 10 stats x 3 windows + 3 stats x 2 windows = 36."""
-        assert len(ROLLING_FEATURE_NAMES) == 36
+        """Rolling features: 73 total (36 original + 37 new in Phase 1)."""
+        assert len(ROLLING_FEATURE_NAMES) == 73
 
     def test_static_features_count(self):
         """Static features should have 9 entries."""
         assert len(STATIC_FEATURES) == 9
+
+    def test_bootstrap_features_count(self):
+        """Bootstrap features should have 32 entries (Phase 2)."""
+        assert len(BOOTSTRAP_FEATURES) == 32
+
+    def test_team_features_count(self):
+        """Team features should have 28 entries (Phase 3)."""
+        assert len(TEAM_FEATURES) == 28
+
+    def test_opponent_features_count(self):
+        """Opponent features should have 24 entries (Phase 3)."""
+        assert len(OPPONENT_FEATURES) == 24
+
+    def test_fixture_features_count(self):
+        """Fixture features should have 16 entries (Phase 4)."""
+        assert len(FIXTURE_FEATURES) == 16
+
+    def test_position_features_count(self):
+        """Position features should have 8 entries (Phase 4)."""
+        assert len(POSITION_FEATURES) == 8
+
+    def test_interaction_features_count(self):
+        """Interaction features should have 5 entries (Phase 4)."""
+        assert len(INTERACTION_FEATURES) == 5
 
     def test_derived_features_count(self):
         """Derived features should have 5 entries."""
         assert len(DERIVED_FEATURES) == 5
 
     def test_feature_cols_composition(self):
-        """FEATURE_COLS = rolling + static + derived."""
-        expected = ROLLING_FEATURE_NAMES + STATIC_FEATURES + DERIVED_FEATURES
+        """FEATURE_COLS = all feature categories combined."""
+        expected = (
+            ROLLING_FEATURE_NAMES
+            + STATIC_FEATURES
+            + BOOTSTRAP_FEATURES
+            + TEAM_FEATURES
+            + OPPONENT_FEATURES
+            + FIXTURE_FEATURES
+            + POSITION_FEATURES
+            + INTERACTION_FEATURES
+            + DERIVED_FEATURES
+        )
         assert FEATURE_COLS == expected
 
     def test_target_col(self):
@@ -62,9 +104,17 @@ class TestFeatureList:
             assert len(parts) == 2, f"Invalid rolling feature name: {name}"
             assert parts[1].isdigit(), f"Window is not a digit: {name}"
 
+    def test_feature_version_format(self):
+        """Feature version should be a valid semantic version string."""
+        parts = FEATURE_VERSION.split(".")
+        assert len(parts) == 3, "Version should have 3 parts (major.minor.patch)"
+        for part in parts:
+            assert part.isdigit(), "Version parts should be numeric"
+
     def test_key_features_present(self):
         """Verify important features are in the list."""
         expected = [
+            # Original core features
             "points_last_1",
             "points_last_3",
             "points_last_5",
@@ -80,9 +130,101 @@ class TestFeatureList:
             "minutes_pct",
             "points_per_90",
             "points_volatility",
+            # New Phase 1 features
+            "expected_goals_last_1",
+            "expected_goals_last_3",
+            "expected_goals_last_5",
+            "expected_assists_last_1",
+            "expected_assists_last_3",
+            "expected_assists_last_5",
+            "minutes_last_1",
+            "minutes_last_3",
+            "minutes_last_5",
+            "starts_last_1",
+            "starts_last_3",
+            "starts_last_5",
+            "red_cards_last_3",
+            "red_cards_last_5",
+            "red_cards_last_10",
+            "own_goals_last_3",
+            "penalties_saved_last_5",
+            "penalties_missed_last_10",
+            # Extended window features
+            "points_last_10",
+            "goals_last_10",
+            "assists_last_10",
+            "ict_index_last_10",
+            "yellow_cards_last_10",
+            "saves_last_10",
+            "transfers_balance_last_10",
         ]
         for feat in expected:
             assert feat in FEATURE_COLS, f"Missing feature: {feat}"
+
+    def test_new_xg_xa_features_present(self):
+        """Verify xG and xA features are present with all windows."""
+        for stat in ["expected_goals", "expected_assists"]:
+            for window in [1, 3, 5]:
+                feat = f"{stat}_last_{window}"
+                assert feat in ROLLING_FEATURE_NAMES, f"Missing: {feat}"
+
+    def test_new_rare_event_features_with_extended_windows(self):
+        """Verify rare event stats have windows (3, 5, 10)."""
+        for stat in ["red_cards", "own_goals", "penalties_saved", "penalties_missed"]:
+            for window in [3, 5, 10]:
+                feat = f"{stat}_last_{window}"
+                assert feat in ROLLING_FEATURE_NAMES, f"Missing: {feat}"
+
+    def test_extended_window_10_for_key_stats(self):
+        """Verify extended window (10) exists for key existing stats."""
+        key_stats = [
+            "points",
+            "goals",
+            "assists",
+            "clean_sheets",
+            "bps",
+            "ict_index",
+            "threat",
+            "creativity",
+            "influence",
+            "bonus",
+            "yellow_cards",
+            "saves",
+            "transfers_balance",
+        ]
+        for stat in key_stats:
+            feat = f"{stat}_last_10"
+            assert feat in ROLLING_FEATURE_NAMES, f"Missing: {feat}"
+
+    def test_bootstrap_features_present(self):
+        """Verify all bootstrap feature categories are present."""
+        # FPL Expected Points & Value
+        assert "ep_this" in BOOTSTRAP_FEATURES
+        assert "ep_next" in BOOTSTRAP_FEATURES
+        assert "points_per_game" in BOOTSTRAP_FEATURES
+        assert "value_form" in BOOTSTRAP_FEATURES
+
+        # Availability & Status
+        assert "status_available" in BOOTSTRAP_FEATURES
+        assert "status_injured" in BOOTSTRAP_FEATURES
+        assert "has_news" in BOOTSTRAP_FEATURES
+
+        # Dream Team & Recognition
+        assert "dreamteam_count" in BOOTSTRAP_FEATURES
+        assert "bonus_rate" in BOOTSTRAP_FEATURES
+
+        # Transfer Momentum
+        assert "transfers_in_event" in BOOTSTRAP_FEATURES
+        assert "net_transfers_event" in BOOTSTRAP_FEATURES
+        assert "transfer_momentum" in BOOTSTRAP_FEATURES
+
+        # Set Piece Responsibility
+        assert "penalties_order" in BOOTSTRAP_FEATURES
+        assert "set_piece_taker" in BOOTSTRAP_FEATURES
+
+        # Season Totals Normalised
+        assert "total_points_rank_pct" in BOOTSTRAP_FEATURES
+        assert "goals_per_90_season" in BOOTSTRAP_FEATURES
 
 
 # === Rolling Average ===
@@ -200,6 +342,14 @@ class TestComputeRollingFeatures:
                 "transfers_in": 5000,
                 "transfers_out": 2000,
                 "minutes": 90,
+                # New Phase 1 fields
+                "expected_goals": "0.65",
+                "expected_assists": "0.20",
+                "starts": 1,
+                "red_cards": 0,
+                "own_goals": 0,
+                "penalties_saved": 0,
+                "penalties_missed": 0,
             },
             {
                 "total_points": 4,
@@ -217,6 +367,14 @@ class TestComputeRollingFeatures:
                 "transfers_in": 3000,
                 "transfers_out": 4000,
                 "minutes": 80,
+                # New Phase 1 fields
+                "expected_goals": "0.35",
+                "expected_assists": "0.55",
+                "starts": 1,
+                "red_cards": 0,
+                "own_goals": 0,
+                "penalties_saved": 0,
+                "penalties_missed": 0,
             },
             {
                 "total_points": 10,
@@ -234,12 +392,20 @@ class TestComputeRollingFeatures:
                 "transfers_in": 8000,
                 "transfers_out": 1000,
                 "minutes": 90,
+                # New Phase 1 fields
+                "expected_goals": "0.90",
+                "expected_assists": "0.45",
+                "starts": 1,
+                "red_cards": 0,
+                "own_goals": 0,
+                "penalties_saved": 0,
+                "penalties_missed": 1,
             },
         ]
 
-    def test_returns_36_features(self, sample_history):
+    def test_returns_73_features(self, sample_history):
         result = compute_rolling_features(sample_history)
-        assert len(result) == 36
+        assert len(result) == 73
 
     def test_all_feature_names_present(self, sample_history):
         result = compute_rolling_features(sample_history)
@@ -261,6 +427,38 @@ class TestComputeRollingFeatures:
         # Balance: (5000-2000)=3000, (3000-4000)=-1000, (8000-1000)=7000
         # last_3 avg: (3000 + -1000 + 7000) / 3 = 3000.0
         assert result["transfers_balance_last_3"] == pytest.approx(3000.0, abs=0.01)
+
+    def test_expected_goals_last_3(self, sample_history):
+        result = compute_rolling_features(sample_history)
+        # avg(0.65, 0.35, 0.90) = 0.633...
+        assert result["expected_goals_last_3"] == pytest.approx(0.63, abs=0.01)
+
+    def test_expected_assists_last_1(self, sample_history):
+        result = compute_rolling_features(sample_history)
+        # Last game only: 0.45
+        assert result["expected_assists_last_1"] == pytest.approx(0.45)
+
+    def test_minutes_last_3(self, sample_history):
+        result = compute_rolling_features(sample_history)
+        # avg(90, 80, 90) = 86.67
+        assert result["minutes_last_3"] == pytest.approx(86.67, abs=0.01)
+
+    def test_starts_last_3(self, sample_history):
+        result = compute_rolling_features(sample_history)
+        # avg(1, 1, 1) = 1.0
+        assert result["starts_last_3"] == pytest.approx(1.0)
+
+    def test_penalties_missed_last_3(self, sample_history):
+        result = compute_rolling_features(sample_history)
+        # avg(0, 0, 1) = 0.33
+        assert result["penalties_missed_last_3"] == pytest.approx(0.33, abs=0.01)
+
+    def test_extended_window_10_with_short_history(self, sample_history):
+        """Window 10 should work with only 3 games of history."""
+        result = compute_rolling_features(sample_history)
+        # With 3 games, window 10 uses all available data
+        assert result["points_last_10"] == pytest.approx(6.67, abs=0.01)
+        assert result["goals_last_10"] == pytest.approx(0.67, abs=0.01)
 
     def test_empty_history(self):
         result = compute_rolling_features([])
@@ -352,3 +550,163 @@ class TestComputeDerivedFeatures:
         assert result["minutes_pct"] == 0.0
         assert result["points_per_90"] == 0.0
         assert result["points_volatility"] == 0.0
+
+
+# === Compute Bootstrap Features ===
+
+
+@pytest.mark.unit
+class TestComputeBootstrapFeatures:
+    @pytest.fixture
+    def sample_player(self):
+        """Sample FPL API player element."""
+        return {
+            "id": 350,
+            "web_name": "Salah",
+            "element_type": 3,  # MID
+            "ep_this": "8.5",
+            "ep_next": "7.2",
+            "points_per_game": "6.8",
+            "value_form": "1.2",
+            "value_season": "1.1",
+            "cost_change_start": 5,
+            "cost_change_event": 1,
+            "cost_change_event_fall": 0,
+            "status": "a",
+            "news": "",
+            "dreamteam_count": 5,
+            "in_dreamteam": True,
+            "bonus": 25,
+            "minutes": 1800,  # 20 games worth
+            "transfers_in_event": 50000,
+            "transfers_out_event": 20000,
+            "selected_by_percent": "45.3",
+            "corners_and_indirect_freekicks_order": 1,
+            "direct_freekicks_order": 2,
+            "penalties_order": 1,
+            "total_points": 120,
+            "goals_scored": 12,
+            "assists": 8,
+            "ict_index": "250.5",
+        }
+
+    def test_returns_32_features(self, sample_player):
+        result = compute_bootstrap_features(sample_player)
+        assert len(result) == 32
+
+    def test_all_feature_names_present(self, sample_player):
+        result = compute_bootstrap_features(sample_player)
+        for name in BOOTSTRAP_FEATURES:
+            assert name in result, f"Missing: {name}"
+
+    def test_ep_this_and_ep_next(self, sample_player):
+        result = compute_bootstrap_features(sample_player)
+        assert result["ep_this"] == pytest.approx(8.5)
+        assert result["ep_next"] == pytest.approx(7.2)
+
+    def test_status_flags(self, sample_player):
+        result = compute_bootstrap_features(sample_player)
+        assert result["status_available"] == 1.0
+        assert result["status_injured"] == 0.0
+        assert result["status_suspended"] == 0.0
+        assert result["status_doubtful"] == 0.0
+
+    def test_injured_status(self, sample_player):
+        sample_player["status"] = "i"
+        result = compute_bootstrap_features(sample_player)
+        assert result["status_available"] == 0.0
+        assert result["status_injured"] == 1.0
+
+    def test_news_injury_detection(self, sample_player):
+        sample_player["news"] = "Hamstring injury - expected back in 2 weeks"
+        result = compute_bootstrap_features(sample_player)
+        assert result["has_news"] == 1.0
+        assert result["news_injury_flag"] == 1.0
+
+    def test_dreamteam_metrics(self, sample_player):
+        result = compute_bootstrap_features(sample_player)
+        assert result["dreamteam_count"] == 5.0
+        assert result["in_dreamteam"] == 1.0
+        # dreamteam_rate = 5 / (1800 // 60) = 5 / 30 = 0.1667
+        assert result["dreamteam_rate"] == pytest.approx(0.1667, abs=0.001)
+
+    def test_transfer_momentum(self, sample_player):
+        result = compute_bootstrap_features(sample_player)
+        assert result["transfers_in_event"] == 50000.0
+        assert result["transfers_out_event"] == 20000.0
+        assert result["net_transfers_event"] == 30000.0
+        # momentum = (50000 - 20000) / (50000 + 20000) = 30000 / 70000 = 0.4286
+        assert result["transfer_momentum"] == pytest.approx(0.4286, abs=0.001)
+
+    def test_set_piece_taker(self, sample_player):
+        result = compute_bootstrap_features(sample_player)
+        assert result["corners_and_indirect_freekicks_order"] == 1.0
+        assert result["penalties_order"] == 1.0
+        assert result["set_piece_taker"] == 1.0
+
+    def test_not_set_piece_taker(self, sample_player):
+        sample_player["corners_and_indirect_freekicks_order"] = 0
+        sample_player["direct_freekicks_order"] = 0
+        sample_player["penalties_order"] = 5
+        result = compute_bootstrap_features(sample_player)
+        assert result["set_piece_taker"] == 0.0
+
+    def test_per_90_stats(self, sample_player):
+        result = compute_bootstrap_features(sample_player)
+        # goals_per_90 = 12 / 1800 * 90 = 0.6
+        assert result["goals_per_90_season"] == pytest.approx(0.6, abs=0.01)
+        # assists_per_90 = 8 / 1800 * 90 = 0.4
+        assert result["assists_per_90_season"] == pytest.approx(0.4, abs=0.01)
+        # ict_per_90 = 250.5 / 1800 * 90 = 12.525
+        assert result["ict_per_90_season"] == pytest.approx(12.53, abs=0.01)
+
+    def test_zero_minutes_defaults(self, sample_player):
+        sample_player["minutes"] = 0
+        result = compute_bootstrap_features(sample_player)
+        assert result["goals_per_90_season"] == 0.0
+        assert result["assists_per_90_season"] == 0.0
+        assert result["ict_per_90_season"] == 0.0
+
+    def test_empty_player(self):
+        """Test with minimal player data."""
+        result = compute_bootstrap_features({})
+        assert len(result) == 32
+        assert result["ep_this"] == 0.0
+        assert result["status_available"] == 1.0  # default status is 'a'
+
+    def test_with_all_players_for_ranking(self, sample_player):
+        """Test ranking features when all_players is provided."""
+        all_players = [
+            {
+                "id": 350,
+                "element_type": 3,
+                "total_points": 120,
+                "transfers_in_event": 50000,
+            },
+            {
+                "id": 351,
+                "element_type": 3,
+                "total_points": 150,
+                "transfers_in_event": 80000,
+            },
+            {
+                "id": 352,
+                "element_type": 3,
+                "total_points": 100,
+                "transfers_in_event": 30000,
+            },
+        ]
+        result = compute_bootstrap_features(sample_player, all_players=all_players)
+
+        # Player 350 has 2nd most points among MIDs (150 > 120 > 100)
+        # rank = 2, percentile = 100 * (1 - (2-1)/(3-1)) = 100 * 0.5 = 50.0
+        assert result["total_points_rank_pct"] == pytest.approx(50.0)
+
+        # Player 350 has 2nd most transfers in (80000 > 50000 > 30000)
+        assert result["transfers_in_rank"] == 2.0
+
+    def test_ownership_change_rate(self, sample_player):
+        """Test ownership change calculation."""
+        result = compute_bootstrap_features(sample_player, prev_ownership=42.0)
+        # 45.3 - 42.0 = 3.3
+        assert result["ownership_change_rate"] == pytest.approx(3.3, abs=0.01)

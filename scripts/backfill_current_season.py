@@ -23,8 +23,22 @@ import pandas as pd
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from lambdas.common.feature_categories.fixture_features import (  # noqa: E402
+    FIXTURE_FEATURES,
+)
+from lambdas.common.feature_categories.interaction_features import (  # noqa: E402
+    INTERACTION_FEATURES,
+)
+from lambdas.common.feature_categories.opponent_features import (  # noqa: E402
+    OPPONENT_FEATURES,
+)
+from lambdas.common.feature_categories.position_features import (  # noqa: E402
+    POSITION_FEATURES,
+)
+from lambdas.common.feature_categories.team_features import TEAM_FEATURES  # noqa: E402
 from lambdas.common.feature_config import (  # noqa: E402
     FEATURE_COLS,
+    compute_bootstrap_features,
     compute_derived_features,
     compute_rolling_features,
 )
@@ -297,6 +311,28 @@ def engineer_backfill_features(
         # Derived features
         derived = compute_derived_features(prior_history, rolling, static)
 
+        # Bootstrap features (computed from player data available at backfill time)
+        # Note: Some features like ranking require all_players which we pass
+        bootstrap = compute_bootstrap_features(player, all_players=players)
+
+        # Team and opponent features (default values for backfill)
+        # Full computation would require team fixtures data not passed here
+        team_feats = {feat: 0.0 for feat in TEAM_FEATURES}
+        opponent_feats = {feat: 0.0 for feat in OPPONENT_FEATURES}
+
+        # Fixture, position, and interaction features (default values)
+        fixture_feats = {feat: 0.0 for feat in FIXTURE_FEATURES}
+        fixture_feats["fdr_current"] = 3.0  # Default medium difficulty
+        fixture_feats["fdr_next_3_avg"] = 3.0
+        fixture_feats["fdr_next_5_avg"] = 3.0
+        fixture_feats["dgw_fixture_count"] = 1.0  # Single fixture
+        fixture_feats["days_since_last_game"] = 7.0
+        fixture_feats["kickoff_hour"] = 15.0  # Default 3pm
+        fixture_feats["is_weekend_game"] = 1.0
+
+        position_feats = {feat: 0.0 for feat in POSITION_FEATURES}
+        interaction_feats = {feat: 0.0 for feat in INTERACTION_FEATURES}
+
         # Build feature row
         feature_row = {
             "player_id": player_id,
@@ -306,6 +342,12 @@ def engineer_backfill_features(
         }
         feature_row.update(rolling)
         feature_row.update(static)
+        feature_row.update(bootstrap)
+        feature_row.update(team_feats)
+        feature_row.update(opponent_feats)
+        feature_row.update(fixture_feats)
+        feature_row.update(position_feats)
+        feature_row.update(interaction_feats)
         feature_row.update(derived)
         feature_row["actual_points"] = actual_points
 
