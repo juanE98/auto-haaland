@@ -25,7 +25,21 @@ import pandas as pd
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from lambdas.common.feature_categories.fixture_features import (  # noqa: E402
+    FIXTURE_FEATURES,
+)
+from lambdas.common.feature_categories.interaction_features import (  # noqa: E402
+    INTERACTION_FEATURES,
+)
+from lambdas.common.feature_categories.opponent_features import (  # noqa: E402
+    OPPONENT_FEATURES,
+)
+from lambdas.common.feature_categories.position_features import (  # noqa: E402
+    POSITION_FEATURES,
+)
+from lambdas.common.feature_categories.team_features import TEAM_FEATURES  # noqa: E402
 from lambdas.common.feature_config import (  # noqa: E402
+    BOOTSTRAP_FEATURES,
     FEATURE_COLS,
     compute_derived_features,
     compute_rolling_features,
@@ -294,6 +308,30 @@ def engineer_historical_features(
         # Derived features
         derived = compute_derived_features(history, rolling, static)
 
+        # Bootstrap features (default values for historical data)
+        # These aren't available from vaastav CSV data, so use sensible defaults
+        bootstrap = {feat: 0.0 for feat in BOOTSTRAP_FEATURES}
+        # A few can be approximated from available data:
+        bootstrap["status_available"] = 1.0  # Assume available if they played
+
+        # Team and opponent features (default values for historical data)
+        # Full computation requires live API data not available historically
+        team_feats = {feat: 0.0 for feat in TEAM_FEATURES}
+        opponent_feats = {feat: 0.0 for feat in OPPONENT_FEATURES}
+
+        # Fixture, position, and interaction features (default values)
+        fixture_feats = {feat: 0.0 for feat in FIXTURE_FEATURES}
+        fixture_feats["fdr_current"] = 3.0  # Default medium difficulty
+        fixture_feats["fdr_next_3_avg"] = 3.0
+        fixture_feats["fdr_next_5_avg"] = 3.0
+        fixture_feats["dgw_fixture_count"] = 1.0  # Single fixture
+        fixture_feats["days_since_last_game"] = 7.0
+        fixture_feats["kickoff_hour"] = 15.0  # Default 3pm
+        fixture_feats["is_weekend_game"] = 1.0
+
+        position_feats = {feat: 0.0 for feat in POSITION_FEATURES}
+        interaction_feats = {feat: 0.0 for feat in INTERACTION_FEATURES}
+
         # Build feature row
         feature_row = {
             "player_id": player_id,
@@ -303,6 +341,12 @@ def engineer_historical_features(
         }
         feature_row.update(rolling)
         feature_row.update(static)
+        feature_row.update(bootstrap)
+        feature_row.update(team_feats)
+        feature_row.update(opponent_feats)
+        feature_row.update(fixture_feats)
+        feature_row.update(position_feats)
+        feature_row.update(interaction_feats)
         feature_row.update(derived)
         feature_row["actual_points"] = actual_points
 
@@ -423,6 +467,14 @@ def process_season(
                     "transfers_out": int(row.get("transfers_out", 0) or 0),
                     "selected": int(row.get("selected", 0) or 0),
                     "round": gw,
+                    # New Phase 1 fields (xG/xA may be missing in older data)
+                    "expected_goals": float(row.get("expected_goals", 0) or 0),
+                    "expected_assists": float(row.get("expected_assists", 0) or 0),
+                    "starts": int(row.get("starts", 0) or 0),
+                    "red_cards": int(row.get("red_cards", 0) or 0),
+                    "own_goals": int(row.get("own_goals", 0) or 0),
+                    "penalties_saved": int(row.get("penalties_saved", 0) or 0),
+                    "penalties_missed": int(row.get("penalties_missed", 0) or 0),
                 }
             )
 
