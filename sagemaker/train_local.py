@@ -19,11 +19,23 @@ from typing import Optional
 import boto3
 import pandas as pd
 import xgboost as xgb
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.metrics import (
+    accuracy_score,
+    f1_score,
+    mean_absolute_error,
+    mean_squared_error,
+    precision_score,
+    r2_score,
+    recall_score,
+    roc_auc_score,
+)
 from sklearn.model_selection import train_test_split
 
-# Add project root to path for imports
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+# Add project root and lambdas to path for imports
+# lambdas is needed because feature_config uses 'from common...' for Lambda compat
+project_root = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(project_root))
+sys.path.insert(0, str(project_root / "lambdas"))
 
 from lambdas.common.feature_config import FEATURE_COLS, TARGET_COL  # noqa: E402
 
@@ -33,7 +45,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Default hyperparameters
+# Default hyperparameters for regression model
 DEFAULT_HYPERPARAMS = {
     "objective": "reg:squarederror",
     "n_estimators": 100,
@@ -41,6 +53,19 @@ DEFAULT_HYPERPARAMS = {
     "learning_rate": 0.1,
     "random_state": 42,
 }
+
+# Default hyperparameters for haul classifier
+HAUL_CLASSIFIER_HYPERPARAMS = {
+    "objective": "binary:logistic",
+    "n_estimators": 100,
+    "max_depth": 5,
+    "learning_rate": 0.1,
+    "random_state": 42,
+    "scale_pos_weight": 5,  # Handle class imbalance (hauls are rare)
+}
+
+# Haul threshold (8+ points is considered a haul)
+HAUL_THRESHOLD = 8
 
 
 def load_training_data(
@@ -250,6 +275,96 @@ def load_model(model_path: str) -> xgb.XGBRegressor:
     return model
 
 
+def train_haul_classifier(
+    df: pd.DataFrame,
+    hyperparams: Optional[dict] = None,
+    test_size: float = 0.2,
+    haul_threshold: int = HAUL_THRESHOLD,
+) -> tuple[xgb.XGBClassifier, pd.DataFrame, pd.Series]:
+    """
+    Train an XGBoost classifier to predict haul probability (8+ points).
+
+    Args:
+        df: DataFrame with features and target.
+        hyperparams: XGBoost hyperparameters (uses defaults if None).
+        test_size: Fraction of data to use for testing.
+        haul_threshold: Points threshold for a "haul" (default: 8).
+
+    Returns:
+        Tuple of (trained classifier, test features DataFrame, test target Series).
+    """
+    validate_features(df)
+
+    params = HAUL_CLASSIFIER_HYPERPARAMS.copy()
+    if hyperparams:
+        params.update(hyperparams)
+
+    X = df[FEATURE_COLS]
+    y = (df[TARGET_COL] >= haul_threshold).astype(int)
+
+    haul_rate = y.mean() * 100
+    logger.info(f"Haul rate (>={haul_threshold} pts): {haul_rate:.2f}%")
+    logger.info(f"Training data shape: {X.shape}")
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=test_size, random_state=params.get("random_state", 42)
+    )
+
+    logger.info(f"Train set: {len(X_train)} samples, Test set: {len(X_test)} samples")
+    logger.info(
+        f"Train haul rate: {y_train.mean()*100:.2f}%, "
+        f"Test haul rate: {y_test.mean()*100:.2f}%"
+    )
+
+    model = xgb.XGBClassifier(**params)
+    model.fit(
+        X_train,
+        y_train,
+        eval_set=[(X_test, y_test)],
+        verbose=False,
+    )
+
+    logger.info("Haul classifier training complete")
+    return model, X_test, y_test
+
+
+def evaluate_haul_classifier(
+    model: xgb.XGBClassifier,
+    X_test: pd.DataFrame,
+    y_test: pd.Series,
+) -> dict:
+    """
+    Evaluate haul classifier performance on test set.
+
+    Args:
+        model: Trained XGBoost classifier.
+        X_test: Test features.
+        y_test: Test target values (binary: haul or not).
+
+    Returns:
+        Dictionary with evaluation metrics.
+    """
+    predictions = model.predict(X_test)
+    probabilities = model.predict_proba(X_test)[:, 1]
+
+    metrics = {
+        "accuracy": accuracy_score(y_test, predictions),
+        "precision": precision_score(y_test, predictions, zero_division=0),
+        "recall": recall_score(y_test, predictions, zero_division=0),
+        "f1": f1_score(y_test, predictions, zero_division=0),
+        "roc_auc": roc_auc_score(y_test, probabilities),
+    }
+
+    logger.info("Haul Classifier Evaluation Metrics:")
+    logger.info(f"  Accuracy:  {metrics['accuracy']:.3f}")
+    logger.info(f"  Precision: {metrics['precision']:.3f}")
+    logger.info(f"  Recall:    {metrics['recall']:.3f}")
+    logger.info(f"  F1 Score:  {metrics['f1']:.3f}")
+    logger.info(f"  ROC AUC:   {metrics['roc_auc']:.3f}")
+
+    return metrics
+
+
 def upload_model_to_s3(
     model_path: str,
     bucket: str,
@@ -342,6 +457,17 @@ def main():
         default="models/model.xgb",
         help="S3 key for model upload (default: models/model.xgb)",
     )
+    parser.add_argument(
+        "--train-haul-classifier",
+        action="store_true",
+        help="Also train a haul probability classifier",
+    )
+    parser.add_argument(
+        "--haul-threshold",
+        type=int,
+        default=8,
+        help="Points threshold for haul classification (default: 8)",
+    )
 
     args = parser.parse_args()
 
@@ -376,9 +502,41 @@ def main():
         s3_uri = upload_model_to_s3(model_path, args.bucket, args.model_key)
         logger.info(f"Model uploaded to: {s3_uri}")
 
-    logger.info("Training complete!")
+    logger.info("Regression model training complete!")
     logger.info(f"Model saved to: {model_path}")
     logger.info(f"Final MAE: {metrics['mae']:.3f} points")
+
+    # Train haul classifier if requested
+    if args.train_haul_classifier:
+        logger.info("\n" + "=" * 50)
+        logger.info("Training Haul Probability Classifier")
+        logger.info("=" * 50)
+
+        haul_model, X_test_haul, y_test_haul = train_haul_classifier(
+            df, test_size=args.test_size, haul_threshold=args.haul_threshold
+        )
+
+        haul_metrics = evaluate_haul_classifier(haul_model, X_test_haul, y_test_haul)
+
+        # Save haul classifier
+        haul_output_path = Path(args.output_path)
+        if haul_output_path.suffix == "":
+            haul_model_path = haul_output_path / "model_haul.xgb"
+        else:
+            haul_model_path = haul_output_path.parent / "model_haul.xgb"
+        haul_model_path.parent.mkdir(parents=True, exist_ok=True)
+        haul_model.save_model(str(haul_model_path))
+        logger.info(f"Haul classifier saved to {haul_model_path}")
+
+        # Upload haul classifier to S3 if requested
+        if args.upload_s3:
+            haul_model_key = args.model_key.replace("model.xgb", "model_haul.xgb")
+            s3_uri = upload_model_to_s3(
+                str(haul_model_path), args.bucket, haul_model_key
+            )
+            logger.info(f"Haul classifier uploaded to: {s3_uri}")
+
+        logger.info(f"Haul classifier ROC AUC: {haul_metrics['roc_auc']:.3f}")
 
 
 if __name__ == "__main__":

@@ -25,6 +25,7 @@ logger.setLevel(logging.INFO)
 # Environment variables
 BUCKET_NAME = os.getenv("BUCKET_NAME", "fpl-ml-data")
 MODEL_KEY = os.getenv("MODEL_KEY", "models/model.xgb")
+HAUL_MODEL_KEY = os.getenv("HAUL_MODEL_KEY", "models/model_haul.xgb")
 AWS_ENDPOINT_URL = os.getenv("AWS_ENDPOINT_URL")  # For LocalStack
 
 # Position mapping (element_type to string)
@@ -35,9 +36,11 @@ POSITION_MAP = {
     4: "FWD",
 }
 
-# Cache model across warm Lambda invocations
+# Cache models across warm Lambda invocations
 _cached_model = None
 _cached_model_key = None
+_cached_haul_model = None
+_cached_haul_model_key = None
 
 
 def load_model_from_s3(
@@ -94,6 +97,50 @@ def load_model_from_s3(
         raise RuntimeError(f"Failed to load model from {local_path}: {e}") from e
 
 
+def load_haul_model_from_s3(
+    s3_client,
+    bucket: str,
+    model_key: str,
+) -> xgb.XGBClassifier | None:
+    """
+    Load XGBoost haul classifier from S3, caching in /tmp for warm invocations.
+
+    Returns None if model doesn't exist (graceful fallback).
+    """
+    global _cached_haul_model, _cached_haul_model_key
+
+    # Return cached model if same key
+    if _cached_haul_model is not None and _cached_haul_model_key == model_key:
+        logger.info("Using cached haul model")
+        return _cached_haul_model
+
+    local_path = "/tmp/model_haul.xgb"
+
+    try:
+        logger.info(f"Downloading haul model from s3://{bucket}/{model_key}")
+        s3_client.download_file(bucket, model_key, local_path)
+    except ClientError as e:
+        error_code = e.response.get("Error", {}).get("Code", "")
+        if error_code in ("404", "NoSuchKey"):
+            logger.warning(f"Haul model not found: s3://{bucket}/{model_key}")
+            return None
+        raise
+
+    try:
+        model = xgb.XGBClassifier()
+        model.load_model(local_path)
+        logger.info("Haul model loaded successfully")
+
+        # Cache for warm invocations
+        _cached_haul_model = model
+        _cached_haul_model_key = model_key
+
+        return model
+    except Exception as e:
+        logger.warning(f"Failed to load haul model: {e}")
+        return None
+
+
 def load_features_from_s3(
     s3_client,
     bucket: str,
@@ -148,22 +195,37 @@ def run_inference(
     features_df: pd.DataFrame,
     gameweek: int,
     season: str,
+    haul_model: xgb.XGBClassifier | None = None,
 ) -> pd.DataFrame:
     """
     Run model predictions on features.
 
     Args:
-        model: Trained XGBoost model
+        model: Trained XGBoost regression model
         features_df: DataFrame with feature columns
         gameweek: Current gameweek
         season: Season string
+        haul_model: Optional trained haul classifier for haul probability
 
     Returns:
         Predictions DataFrame with schema:
-        player_id, gameweek, predicted_points, position, player_name, team_id, season
+        player_id, gameweek, predicted_points, position, player_name, team_id,
+        season, chance_of_playing, haul_probability
     """
     X = features_df[FEATURE_COLS]
     predictions = model.predict(X)
+
+    # Get haul probabilities if model is available
+    if haul_model is not None:
+        haul_probabilities = haul_model.predict_proba(X)[:, 1]
+        haul_probabilities = (haul_probabilities * 100).round(1)  # To percentage
+        logger.info(
+            f"Haul probabilities - Mean: {haul_probabilities.mean():.1f}%, "
+            f"Max: {haul_probabilities.max():.1f}%"
+        )
+    else:
+        haul_probabilities = [0.0] * len(features_df)
+        logger.info("No haul model available, setting haul_probability to 0")
 
     results = pd.DataFrame(
         {
@@ -180,6 +242,10 @@ def run_inference(
                 "team_id", pd.Series([0] * len(features_df))
             ).astype(int),
             "season": season,
+            "chance_of_playing": features_df.get(
+                "chance_of_playing", pd.Series([100] * len(features_df))
+            ).astype(int),
+            "haul_probability": haul_probabilities,
         }
     )
 
@@ -275,15 +341,20 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     # Initialise S3 client
     s3_client = get_s3_client(endpoint_url=AWS_ENDPOINT_URL)
 
-    # Load model
+    # Load regression model
     model = load_model_from_s3(s3_client, BUCKET_NAME, model_key)
+
+    # Load haul classifier (optional, graceful fallback if not found)
+    haul_model = load_haul_model_from_s3(s3_client, BUCKET_NAME, HAUL_MODEL_KEY)
 
     # Load and validate features
     features_df = load_features_from_s3(s3_client, BUCKET_NAME, features_file)
     validate_features(features_df)
 
-    # Run inference
-    predictions_df = run_inference(model, features_df, gameweek, season)
+    # Run inference with both models
+    predictions_df = run_inference(
+        model, features_df, gameweek, season, haul_model=haul_model
+    )
 
     # Save predictions to S3
     save_predictions_to_s3(s3_client, predictions_df, BUCKET_NAME, predictions_key)

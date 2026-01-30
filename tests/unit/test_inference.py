@@ -199,6 +199,8 @@ class TestRunInference:
             "player_name",
             "team_id",
             "season",
+            "chance_of_playing",
+            "haul_probability",
         }
         assert set(result.columns) == expected_cols
 

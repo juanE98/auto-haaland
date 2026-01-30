@@ -98,12 +98,12 @@ backfill:
 	venv/bin/python scripts/backfill_current_season.py --output-dir data/current/ $(if $(END_GW),--end-gw $(END_GW),)
 
 train-local:
-	@echo "Training model locally..."
-	venv/bin/python sagemaker/train_local.py --data-dir data/ --output-path models/
+	@echo "Training models locally..."
+	venv/bin/python sagemaker/train_local.py --data-dir data/ --output-path models/ --train-haul-classifier
 
 train-and-upload:
-	@echo "Training model and uploading to S3..."
-	venv/bin/python sagemaker/train_local.py --data-dir data/ --output-path models/ --upload-s3 --bucket fpl-ml-data-dev
+	@echo "Training models and uploading to S3..."
+	venv/bin/python sagemaker/train_local.py --data-dir data/ --output-path models/ --upload-s3 --bucket fpl-ml-data-dev --train-haul-classifier
 
 API_ENDPOINT ?= $(shell aws ssm get-parameter --name /auto-haaland/dev/api-endpoint --query Parameter.Value --output text --region ap-southeast-2 2>/dev/null)
 STATE_MACHINE_ARN ?= $(shell aws ssm get-parameter --name /auto-haaland/dev/state-machine-arn --query Parameter.Value --output text --region ap-southeast-2 2>/dev/null)

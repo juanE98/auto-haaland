@@ -114,6 +114,14 @@ def convert_to_dynamodb_item(row: pd.Series) -> dict[str, Any]:
     if "season" in row and pd.notna(row["season"]):
         item["season"] = str(row["season"])
 
+    if "chance_of_playing" in row and pd.notna(row["chance_of_playing"]):
+        item["chance_of_playing"] = int(row["chance_of_playing"])
+
+    if "haul_probability" in row and pd.notna(row["haul_probability"]):
+        item["haul_probability"] = Decimal(
+            str(round(float(row["haul_probability"]), 1))
+        )
+
     return item
 
 
