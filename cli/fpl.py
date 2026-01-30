@@ -17,10 +17,14 @@ class FPLClient:
         self.base_url = base_url.rstrip("/")
 
     def get_top(
-        self, gameweek: int, position: str | None = None, limit: int = 10
+        self,
+        gameweek: int,
+        position: str | None = None,
+        limit: int = 10,
+        sort_by: str = "points",
     ) -> dict:
         """Get top predicted scorers for a gameweek."""
-        params = {"gameweek": gameweek, "limit": limit}
+        params = {"gameweek": gameweek, "limit": limit, "sort_by": sort_by}
         if position:
             params["position"] = position
         return self._get("/top", params)
@@ -112,13 +116,20 @@ def get_client(ctx) -> FPLClient:
     type=int,
     help="Number of results (default: 10)",
 )
+@click.option(
+    "--sort",
+    "-s",
+    type=click.Choice(["points", "haul"], case_sensitive=False),
+    default="points",
+    help="Sort by predicted points or haul probability (default: points)",
+)
 @click.pass_context
-def top(ctx, gameweek: int, position: str | None, limit: int):
+def top(ctx, gameweek: int, position: str | None, limit: int, sort: str):
     """Get top predicted scorers for a gameweek."""
     client = get_client(ctx)
 
     try:
-        data = client.get_top(gameweek, position, limit)
+        data = client.get_top(gameweek, position, limit, sort_by=sort)
     except httpx.HTTPStatusError as e:
         click.echo(f"Error: {e.response.status_code} - {e.response.text}", err=True)
         ctx.exit(1)
@@ -128,23 +139,42 @@ def top(ctx, gameweek: int, position: str | None, limit: int):
         click.echo(f"No predictions found for gameweek {gameweek}")
         return
 
+    sort_label = "Haul %" if sort == "haul" else "Points"
     title = f"Top {len(predictions)} Predictions - Gameweek {gameweek}"
     if position:
         title += f" ({position})"
+    title += f" [sorted by {sort_label}]"
     click.echo(title)
     click.echo()
 
-    table_data = [
-        [
-            i + 1,
-            p.get("player_name", f"ID: {p['player_id']}"),
-            p.get("position", "-"),
-            format_points(p["predicted_points"]),
-        ]
-        for i, p in enumerate(predictions)
-    ]
+    # Include haul probability if available
+    has_haul = any(p.get("haul_probability") for p in predictions)
 
-    click.echo(tabulate(table_data, headers=["Rank", "Player", "Pos", "Points"]))
+    if has_haul:
+        table_data = [
+            [
+                i + 1,
+                p.get("player_name", f"ID: {p['player_id']}"),
+                p.get("position", "-"),
+                format_points(p["predicted_points"]),
+                f"{p.get('haul_probability', 0):.0f}%",
+            ]
+            for i, p in enumerate(predictions)
+        ]
+        headers = ["Rank", "Player", "Pos", "Points", "Haul %"]
+    else:
+        table_data = [
+            [
+                i + 1,
+                p.get("player_name", f"ID: {p['player_id']}"),
+                p.get("position", "-"),
+                format_points(p["predicted_points"]),
+            ]
+            for i, p in enumerate(predictions)
+        ]
+        headers = ["Rank", "Player", "Pos", "Points"]
+
+    click.echo(tabulate(table_data, headers=headers))
 
 
 @cli.command()
