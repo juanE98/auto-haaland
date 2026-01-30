@@ -1,4 +1,4 @@
-.PHONY: setup install test test-unit test-integration local-up local-down local-api local-logs clean help import-historical backfill train-local train-and-upload top player compare predictions run-pipeline lint format
+.PHONY: setup install test test-unit test-integration local-up local-down local-api local-logs clean help import-historical backfill train-local train-and-upload top haul player compare predictions run-pipeline lint format
 
 # Helper for comma in $(if ...) expansions
 comma := ,
@@ -111,7 +111,13 @@ top:
 ifndef GW
 	$(error GW is required. Usage: make top GW=22)
 endif
-	venv/bin/python -m cli.fpl --endpoint $(API_ENDPOINT) top -g $(GW) $(if $(LIMIT),-n $(LIMIT),)
+	venv/bin/python -m cli.fpl --endpoint $(API_ENDPOINT) top -g $(GW) $(if $(LIMIT),-n $(LIMIT),) $(if $(SORT),-s $(SORT),)
+
+haul:
+ifndef GW
+	$(error GW is required. Usage: make haul GW=24)
+endif
+	venv/bin/python -m cli.fpl --endpoint $(API_ENDPOINT) top -g $(GW) $(if $(LIMIT),-n $(LIMIT),) -s haul
 
 player:
 ifndef ID
@@ -138,11 +144,14 @@ endif
 	venv/bin/python -m cli.fpl --endpoint $(API_ENDPOINT) predictions -g $(GW)
 
 run-pipeline:
-	@echo "Triggering FPL prediction pipeline..."
-	aws stepfunctions start-execution \
+	@echo "Triggering FPL prediction pipeline$(if $(GW), for GW$(GW),)..."
+	@aws stepfunctions start-execution \
 		--state-machine-arn $(STATE_MACHINE_ARN) \
 		--input '{"fetch_player_details": true$(if $(GW), $(comma) "gameweek": $(GW),)}' \
-		--region ap-southeast-2
+		--region ap-southeast-2 \
+		--no-cli-pager \
+		--query 'executionArn' \
+		--output text > /dev/null && echo "Pipeline started successfully." || echo "Failed to start pipeline."
 
 lint:
 	@echo "Running lint checks..."
