@@ -29,8 +29,8 @@ class TestFeatureColumns:
     """Tests for feature column definitions."""
 
     def test_feature_cols_count(self):
-        """Verify correct number of feature columns."""
-        assert len(FEATURE_COLS) == 50
+        """Verify correct number of feature columns (200 after Phase 4)."""
+        assert len(FEATURE_COLS) == 200
 
     def test_feature_cols_key_names(self):
         """Verify key feature column names are present."""
@@ -49,6 +49,39 @@ class TestFeatureColumns:
             "points_per_90",
             "goal_contributions_last_3",
             "points_volatility",
+            # New Phase 1 features
+            "expected_goals_last_3",
+            "expected_assists_last_3",
+            "minutes_last_3",
+            "starts_last_3",
+            "red_cards_last_5",
+            "points_last_10",
+            # New Phase 2 bootstrap features
+            "ep_this",
+            "ep_next",
+            "points_per_game",
+            "status_available",
+            "dreamteam_count",
+            "transfers_in_event",
+            "penalties_order",
+            "total_points_rank_pct",
+            # New Phase 3 team/opponent features
+            "team_form_score",
+            "team_strength_overall",
+            "team_league_position",
+            "opp_goals_conceded_last_3",
+            "opp_clean_sheets_rate",
+            "opp_defensive_rating",
+            # New Phase 4 fixture/position/interaction features
+            "fdr_current",
+            "is_double_gameweek",
+            "days_since_last_game",
+            "gk_saves_per_90",
+            "def_clean_sheet_rate",
+            "mid_goal_involvement_rate",
+            "fwd_conversion_rate",
+            "form_x_fixture_difficulty",
+            "momentum_score",
         ]
         for col in expected_subset:
             assert col in FEATURE_COLS, f"Missing: {col}"
@@ -61,95 +94,20 @@ class TestFeatureColumns:
 class TestValidateFeatures:
     """Tests for validate_features function."""
 
-    @pytest.fixture
-    def valid_dataframe(self):
-        """Create a valid training DataFrame."""
-        return pd.DataFrame(
-            {
-                # Rolling averages: points
-                "points_last_1": [8.0, 4.0, 12.0],
-                "points_last_3": [7.3, 5.2, 8.0],
-                "points_last_5": [6.8, 4.9, 7.5],
-                # Rolling averages: goals
-                "goals_last_1": [1.0, 0.0, 0.0],
-                "goals_last_3": [0.67, 1.0, 0.33],
-                "goals_last_5": [0.6, 0.8, 0.4],
-                # Rolling averages: assists
-                "assists_last_1": [0.0, 0.0, 1.0],
-                "assists_last_3": [0.33, 0.0, 0.67],
-                "assists_last_5": [0.4, 0.2, 0.6],
-                # Rolling averages: clean sheets
-                "clean_sheets_last_1": [0, 0, 1],
-                "clean_sheets_last_3": [0.0, 0.0, 0.33],
-                "clean_sheets_last_5": [0.2, 0.0, 0.4],
-                # Rolling averages: BPS
-                "bps_last_1": [30.0, 25.0, 28.0],
-                "bps_last_3": [28.0, 32.0, 25.0],
-                "bps_last_5": [27.0, 30.0, 24.0],
-                # Rolling averages: ICT index
-                "ict_index_last_1": [88.0, 90.0, 75.0],
-                "ict_index_last_3": [85.3, 92.1, 78.5],
-                "ict_index_last_5": [82.0, 88.0, 76.0],
-                # Rolling averages: threat
-                "threat_last_1": [48.0, 55.0, 35.0],
-                "threat_last_3": [45.0, 60.0, 38.0],
-                "threat_last_5": [42.0, 58.0, 36.0],
-                # Rolling averages: creativity
-                "creativity_last_1": [58.0, 28.0, 60.0],
-                "creativity_last_3": [55.0, 30.0, 62.0],
-                "creativity_last_5": [52.0, 32.0, 58.0],
-                # Rolling averages: influence
-                "influence_last_1": [38.0, 42.0, 30.0],
-                "influence_last_3": [35.0, 40.0, 28.0],
-                "influence_last_5": [33.0, 38.0, 27.0],
-                # Rolling averages: bonus
-                "bonus_last_1": [2, 1, 3],
-                "bonus_last_3": [1.3, 0.7, 2.0],
-                "bonus_last_5": [1.0, 0.6, 1.8],
-                # Rolling averages: yellow cards
-                "yellow_cards_last_3": [0.33, 0.0, 0.0],
-                "yellow_cards_last_5": [0.2, 0.2, 0.0],
-                # Rolling averages: saves
-                "saves_last_3": [0.0, 0.0, 0.0],
-                "saves_last_5": [0.0, 0.0, 0.0],
-                # Rolling averages: transfers balance
-                "transfers_balance_last_3": [5000, -2000, 8000],
-                "transfers_balance_last_5": [4000, -1500, 7000],
-                # Static features
-                "form_score": [8.5, 5.8, 7.9],
-                "opponent_strength": [3, 4, 2],
-                "home_away": [1, 0, 1],
-                "chance_of_playing": [100, 75, 100],
-                "position": [3, 4, 3],
-                "opponent_attack_strength": [1200, 1350, 1100],
-                "opponent_defence_strength": [1250, 1300, 1150],
-                "selected_by_percent": [45.3, 52.1, 38.7],
-                "now_cost": [95, 120, 75],
-                # Derived features
-                "minutes_pct": [0.95, 0.88, 1.0],
-                "form_x_difficulty": [25.5, 23.2, 15.8],
-                "points_per_90": [5.5, 3.8, 8.2],
-                "goal_contributions_last_3": [1.0, 1.0, 1.0],
-                "points_volatility": [2.1, 1.5, 3.2],
-                # Target
-                "actual_points": [8, 4, 12],
-            }
-        )
-
-    def test_valid_dataframe_passes(self, valid_dataframe):
+    def test_valid_dataframe_passes(self, training_dataframe_5):
         """Verify valid DataFrame passes validation."""
         # Should not raise
-        validate_features(valid_dataframe)
+        validate_features(training_dataframe_5)
 
-    def test_missing_feature_column_raises(self, valid_dataframe):
+    def test_missing_feature_column_raises(self, training_dataframe_5):
         """Verify missing feature column raises ValueError."""
-        df = valid_dataframe.drop(columns=["points_last_3"])
+        df = training_dataframe_5.drop(columns=["points_last_3"])
         with pytest.raises(ValueError, match="Missing feature columns"):
             validate_features(df)
 
-    def test_missing_target_column_raises(self, valid_dataframe):
+    def test_missing_target_column_raises(self, training_dataframe_5):
         """Verify missing target column raises ValueError."""
-        df = valid_dataframe.drop(columns=["actual_points"])
+        df = training_dataframe_5.drop(columns=["actual_points"])
         with pytest.raises(ValueError, match="Missing target column"):
             validate_features(df)
 
@@ -219,461 +177,33 @@ class TestLoadTrainingData:
 class TestTrainModel:
     """Tests for train_model function."""
 
-    @pytest.fixture
-    def training_dataframe(self):
-        """Create a training DataFrame with enough samples."""
-        # Need enough samples for train/test split
-        return pd.DataFrame(
-            {
-                # Rolling averages: points
-                "points_last_1": [8.0, 4.0, 12.0, 2.0, 6.0, 15.0, 1.0, 9.0, 5.0, 11.0],
-                "points_last_3": [7.3, 5.2, 8.0, 4.5, 6.7, 9.1, 3.2, 7.8, 5.5, 8.9],
-                "points_last_5": [6.8, 4.9, 7.5, 4.2, 6.1, 8.5, 3.0, 7.2, 5.1, 8.3],
-                # Rolling averages: goals
-                "goals_last_1": [1.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 1.0, 0.0, 0.0],
-                "goals_last_3": [
-                    0.67,
-                    1.0,
-                    0.33,
-                    0.0,
-                    0.33,
-                    1.33,
-                    0.0,
-                    0.67,
-                    0.33,
-                    0.33,
-                ],
-                "goals_last_5": [
-                    0.6,
-                    0.8,
-                    0.4,
-                    0.0,
-                    0.2,
-                    1.2,
-                    0.0,
-                    0.6,
-                    0.2,
-                    0.4,
-                ],
-                # Rolling averages: assists
-                "assists_last_1": [0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0],
-                "assists_last_3": [
-                    0.33,
-                    0.0,
-                    0.67,
-                    0.33,
-                    0.33,
-                    0.0,
-                    0.33,
-                    0.0,
-                    0.0,
-                    0.33,
-                ],
-                "assists_last_5": [
-                    0.4,
-                    0.2,
-                    0.6,
-                    0.2,
-                    0.4,
-                    0.0,
-                    0.2,
-                    0.0,
-                    0.2,
-                    0.4,
-                ],
-                # Rolling averages: clean sheets
-                "clean_sheets_last_1": [0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
-                "clean_sheets_last_3": [
-                    0.0,
-                    0.0,
-                    0.33,
-                    0.33,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                ],
-                "clean_sheets_last_5": [
-                    0.2,
-                    0.0,
-                    0.4,
-                    0.2,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.2,
-                    0.0,
-                    0.0,
-                ],
-                # Rolling averages: BPS
-                "bps_last_1": [
-                    30.0,
-                    25.0,
-                    28.0,
-                    15.0,
-                    20.0,
-                    38.0,
-                    12.0,
-                    26.0,
-                    18.0,
-                    22.0,
-                ],
-                "bps_last_3": [
-                    28.0,
-                    32.0,
-                    25.0,
-                    18.0,
-                    22.0,
-                    35.0,
-                    15.0,
-                    24.0,
-                    20.0,
-                    19.0,
-                ],
-                "bps_last_5": [
-                    27.0,
-                    30.0,
-                    24.0,
-                    17.0,
-                    21.0,
-                    33.0,
-                    14.0,
-                    23.0,
-                    19.0,
-                    18.0,
-                ],
-                # Rolling averages: ICT index
-                "ict_index_last_1": [
-                    88.0,
-                    90.0,
-                    75.0,
-                    48.0,
-                    62.0,
-                    98.0,
-                    38.0,
-                    82.0,
-                    52.0,
-                    90.0,
-                ],
-                "ict_index_last_3": [
-                    85.3,
-                    92.1,
-                    78.5,
-                    50.2,
-                    65.0,
-                    95.0,
-                    40.0,
-                    80.0,
-                    55.0,
-                    88.0,
-                ],
-                "ict_index_last_5": [
-                    82.0,
-                    88.0,
-                    76.0,
-                    48.0,
-                    62.0,
-                    92.0,
-                    38.0,
-                    78.0,
-                    52.0,
-                    85.0,
-                ],
-                # Rolling averages: threat
-                "threat_last_1": [
-                    48.0,
-                    55.0,
-                    35.0,
-                    22.0,
-                    32.0,
-                    68.0,
-                    18.0,
-                    52.0,
-                    28.0,
-                    58.0,
-                ],
-                "threat_last_3": [
-                    45.0,
-                    60.0,
-                    38.0,
-                    25.0,
-                    35.0,
-                    65.0,
-                    20.0,
-                    50.0,
-                    30.0,
-                    55.0,
-                ],
-                "threat_last_5": [
-                    42.0,
-                    58.0,
-                    36.0,
-                    24.0,
-                    33.0,
-                    62.0,
-                    19.0,
-                    48.0,
-                    28.0,
-                    52.0,
-                ],
-                # Rolling averages: creativity
-                "creativity_last_1": [
-                    58.0,
-                    28.0,
-                    60.0,
-                    38.0,
-                    50.0,
-                    30.0,
-                    32.0,
-                    45.0,
-                    35.0,
-                    52.0,
-                ],
-                "creativity_last_3": [
-                    55.0,
-                    30.0,
-                    62.0,
-                    40.0,
-                    48.0,
-                    28.0,
-                    35.0,
-                    42.0,
-                    38.0,
-                    50.0,
-                ],
-                "creativity_last_5": [
-                    52.0,
-                    32.0,
-                    58.0,
-                    38.0,
-                    45.0,
-                    30.0,
-                    33.0,
-                    40.0,
-                    36.0,
-                    48.0,
-                ],
-                # Rolling averages: influence
-                "influence_last_1": [
-                    38.0,
-                    42.0,
-                    30.0,
-                    25.0,
-                    35.0,
-                    48.0,
-                    20.0,
-                    40.0,
-                    28.0,
-                    45.0,
-                ],
-                "influence_last_3": [
-                    35.0,
-                    40.0,
-                    28.0,
-                    24.0,
-                    33.0,
-                    45.0,
-                    22.0,
-                    38.0,
-                    26.0,
-                    42.0,
-                ],
-                "influence_last_5": [
-                    33.0,
-                    38.0,
-                    27.0,
-                    22.0,
-                    30.0,
-                    42.0,
-                    20.0,
-                    36.0,
-                    25.0,
-                    40.0,
-                ],
-                # Rolling averages: bonus
-                "bonus_last_1": [2, 1, 3, 0, 1, 3, 0, 2, 0, 2],
-                "bonus_last_3": [1.3, 0.7, 2.0, 0.3, 0.7, 2.3, 0.0, 1.3, 0.3, 1.7],
-                "bonus_last_5": [1.0, 0.6, 1.8, 0.2, 0.6, 2.0, 0.0, 1.2, 0.4, 1.4],
-                # Rolling averages: yellow cards
-                "yellow_cards_last_3": [
-                    0.33,
-                    0.0,
-                    0.0,
-                    0.33,
-                    0.0,
-                    0.33,
-                    0.0,
-                    0.33,
-                    0.67,
-                    0.0,
-                ],
-                "yellow_cards_last_5": [
-                    0.2,
-                    0.2,
-                    0.0,
-                    0.4,
-                    0.0,
-                    0.2,
-                    0.0,
-                    0.2,
-                    0.4,
-                    0.0,
-                ],
-                # Rolling averages: saves
-                "saves_last_3": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                "saves_last_5": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                # Rolling averages: transfers balance
-                "transfers_balance_last_3": [
-                    5000,
-                    -2000,
-                    8000,
-                    -500,
-                    3000,
-                    10000,
-                    -3000,
-                    4000,
-                    1000,
-                    6000,
-                ],
-                "transfers_balance_last_5": [
-                    4000,
-                    -1500,
-                    7000,
-                    -800,
-                    2500,
-                    9000,
-                    -2500,
-                    3500,
-                    800,
-                    5500,
-                ],
-                # Static features
-                "form_score": [8.5, 5.8, 7.9, 4.0, 6.5, 9.0, 3.5, 7.5, 5.5, 8.8],
-                "opponent_strength": [3, 4, 2, 5, 3, 2, 4, 3, 4, 2],
-                "home_away": [1, 0, 1, 0, 1, 1, 0, 1, 0, 1],
-                "chance_of_playing": [100, 75, 100, 50, 100, 100, 25, 100, 75, 100],
-                "position": [3, 4, 3, 3, 3, 4, 3, 4, 4, 4],
-                "opponent_attack_strength": [
-                    1200,
-                    1350,
-                    1100,
-                    1280,
-                    1200,
-                    1150,
-                    1300,
-                    1250,
-                    1180,
-                    1100,
-                ],
-                "opponent_defence_strength": [
-                    1250,
-                    1300,
-                    1150,
-                    1320,
-                    1200,
-                    1180,
-                    1280,
-                    1220,
-                    1200,
-                    1150,
-                ],
-                "selected_by_percent": [
-                    45.3,
-                    52.1,
-                    38.7,
-                    22.0,
-                    30.5,
-                    55.0,
-                    15.0,
-                    40.0,
-                    25.0,
-                    48.0,
-                ],
-                "now_cost": [95, 120, 75, 55, 80, 130, 45, 90, 65, 110],
-                # Derived features
-                "minutes_pct": [0.95, 0.88, 1.0, 0.7, 0.9, 1.0, 0.5, 0.95, 0.85, 1.0],
-                "form_x_difficulty": [
-                    25.5,
-                    23.2,
-                    15.8,
-                    20.0,
-                    19.5,
-                    18.0,
-                    14.0,
-                    22.5,
-                    22.0,
-                    17.6,
-                ],
-                "points_per_90": [
-                    5.5,
-                    3.8,
-                    8.2,
-                    2.5,
-                    4.8,
-                    9.5,
-                    1.8,
-                    6.2,
-                    4.0,
-                    7.5,
-                ],
-                "goal_contributions_last_3": [
-                    1.0,
-                    1.0,
-                    1.0,
-                    0.33,
-                    0.66,
-                    1.33,
-                    0.33,
-                    0.67,
-                    0.33,
-                    0.66,
-                ],
-                "points_volatility": [
-                    2.1,
-                    1.5,
-                    3.2,
-                    1.2,
-                    1.8,
-                    3.5,
-                    1.0,
-                    2.5,
-                    1.6,
-                    2.8,
-                ],
-                # Target
-                "actual_points": [8, 4, 12, 2, 6, 15, 1, 9, 5, 11],
-            }
-        )
-
-    def test_train_returns_model(self, training_dataframe):
+    def test_train_returns_model(self, training_dataframe_10):
         """Verify training returns a valid XGBoost model."""
-        model, X_test, y_test = train_model(training_dataframe)
+        model, X_test, y_test = train_model(training_dataframe_10)
 
         assert isinstance(model, xgb.XGBRegressor)
         assert hasattr(model, "predict")
 
-    def test_train_returns_test_data(self, training_dataframe):
+    def test_train_returns_test_data(self, training_dataframe_10):
         """Verify training returns test data for evaluation."""
-        model, X_test, y_test = train_model(training_dataframe, test_size=0.2)
+        model, X_test, y_test = train_model(training_dataframe_10, test_size=0.2)
 
         assert len(X_test) == 2  # 20% of 10 samples
         assert len(y_test) == 2
 
-    def test_custom_hyperparameters(self, training_dataframe):
+    def test_custom_hyperparameters(self, training_dataframe_10):
         """Test training with custom hyperparameters."""
         hyperparams = {"n_estimators": 50, "max_depth": 3}
-        model, _, _ = train_model(training_dataframe, hyperparams=hyperparams)
+        model, _, _ = train_model(training_dataframe_10, hyperparams=hyperparams)
 
         assert model.n_estimators == 50
         assert model.max_depth == 3
 
-    def test_predictions_are_numeric(self, training_dataframe):
+    def test_predictions_are_numeric(self, training_dataframe_10):
         """Verify model produces numeric predictions."""
         import numpy as np
 
-        model, X_test, _ = train_model(training_dataframe)
+        model, X_test, _ = train_model(training_dataframe_10)
         predictions = model.predict(X_test)
 
         assert len(predictions) == len(X_test)
@@ -684,432 +214,9 @@ class TestEvaluateModel:
     """Tests for evaluate_model function."""
 
     @pytest.fixture
-    def trained_model_and_data(self):
+    def trained_model_and_data(self, training_dataframe_10):
         """Create a trained model and test data."""
-        df = pd.DataFrame(
-            {
-                # Rolling averages: points
-                "points_last_1": [8.0, 4.0, 12.0, 2.0, 6.0, 15.0, 1.0, 9.0, 5.0, 11.0],
-                "points_last_3": [7.3, 5.2, 8.0, 4.5, 6.7, 9.1, 3.2, 7.8, 5.5, 8.9],
-                "points_last_5": [6.8, 4.9, 7.5, 4.2, 6.1, 8.5, 3.0, 7.2, 5.1, 8.3],
-                # Rolling averages: goals
-                "goals_last_1": [1.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 1.0, 0.0, 0.0],
-                "goals_last_3": [
-                    0.67,
-                    1.0,
-                    0.33,
-                    0.0,
-                    0.33,
-                    1.33,
-                    0.0,
-                    0.67,
-                    0.33,
-                    0.33,
-                ],
-                "goals_last_5": [
-                    0.6,
-                    0.8,
-                    0.4,
-                    0.0,
-                    0.2,
-                    1.2,
-                    0.0,
-                    0.6,
-                    0.2,
-                    0.4,
-                ],
-                # Rolling averages: assists
-                "assists_last_1": [0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0],
-                "assists_last_3": [
-                    0.33,
-                    0.0,
-                    0.67,
-                    0.33,
-                    0.33,
-                    0.0,
-                    0.33,
-                    0.0,
-                    0.0,
-                    0.33,
-                ],
-                "assists_last_5": [
-                    0.4,
-                    0.2,
-                    0.6,
-                    0.2,
-                    0.4,
-                    0.0,
-                    0.2,
-                    0.0,
-                    0.2,
-                    0.4,
-                ],
-                # Rolling averages: clean sheets
-                "clean_sheets_last_1": [0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
-                "clean_sheets_last_3": [
-                    0.0,
-                    0.0,
-                    0.33,
-                    0.33,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                ],
-                "clean_sheets_last_5": [
-                    0.2,
-                    0.0,
-                    0.4,
-                    0.2,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.2,
-                    0.0,
-                    0.0,
-                ],
-                # Rolling averages: BPS
-                "bps_last_1": [
-                    30.0,
-                    25.0,
-                    28.0,
-                    15.0,
-                    20.0,
-                    38.0,
-                    12.0,
-                    26.0,
-                    18.0,
-                    22.0,
-                ],
-                "bps_last_3": [
-                    28.0,
-                    32.0,
-                    25.0,
-                    18.0,
-                    22.0,
-                    35.0,
-                    15.0,
-                    24.0,
-                    20.0,
-                    19.0,
-                ],
-                "bps_last_5": [
-                    27.0,
-                    30.0,
-                    24.0,
-                    17.0,
-                    21.0,
-                    33.0,
-                    14.0,
-                    23.0,
-                    19.0,
-                    18.0,
-                ],
-                # Rolling averages: ICT index
-                "ict_index_last_1": [
-                    88.0,
-                    90.0,
-                    75.0,
-                    48.0,
-                    62.0,
-                    98.0,
-                    38.0,
-                    82.0,
-                    52.0,
-                    90.0,
-                ],
-                "ict_index_last_3": [
-                    85.3,
-                    92.1,
-                    78.5,
-                    50.2,
-                    65.0,
-                    95.0,
-                    40.0,
-                    80.0,
-                    55.0,
-                    88.0,
-                ],
-                "ict_index_last_5": [
-                    82.0,
-                    88.0,
-                    76.0,
-                    48.0,
-                    62.0,
-                    92.0,
-                    38.0,
-                    78.0,
-                    52.0,
-                    85.0,
-                ],
-                # Rolling averages: threat
-                "threat_last_1": [
-                    48.0,
-                    55.0,
-                    35.0,
-                    22.0,
-                    32.0,
-                    68.0,
-                    18.0,
-                    52.0,
-                    28.0,
-                    58.0,
-                ],
-                "threat_last_3": [
-                    45.0,
-                    60.0,
-                    38.0,
-                    25.0,
-                    35.0,
-                    65.0,
-                    20.0,
-                    50.0,
-                    30.0,
-                    55.0,
-                ],
-                "threat_last_5": [
-                    42.0,
-                    58.0,
-                    36.0,
-                    24.0,
-                    33.0,
-                    62.0,
-                    19.0,
-                    48.0,
-                    28.0,
-                    52.0,
-                ],
-                # Rolling averages: creativity
-                "creativity_last_1": [
-                    58.0,
-                    28.0,
-                    60.0,
-                    38.0,
-                    50.0,
-                    30.0,
-                    32.0,
-                    45.0,
-                    35.0,
-                    52.0,
-                ],
-                "creativity_last_3": [
-                    55.0,
-                    30.0,
-                    62.0,
-                    40.0,
-                    48.0,
-                    28.0,
-                    35.0,
-                    42.0,
-                    38.0,
-                    50.0,
-                ],
-                "creativity_last_5": [
-                    52.0,
-                    32.0,
-                    58.0,
-                    38.0,
-                    45.0,
-                    30.0,
-                    33.0,
-                    40.0,
-                    36.0,
-                    48.0,
-                ],
-                # Rolling averages: influence
-                "influence_last_1": [
-                    38.0,
-                    42.0,
-                    30.0,
-                    25.0,
-                    35.0,
-                    48.0,
-                    20.0,
-                    40.0,
-                    28.0,
-                    45.0,
-                ],
-                "influence_last_3": [
-                    35.0,
-                    40.0,
-                    28.0,
-                    24.0,
-                    33.0,
-                    45.0,
-                    22.0,
-                    38.0,
-                    26.0,
-                    42.0,
-                ],
-                "influence_last_5": [
-                    33.0,
-                    38.0,
-                    27.0,
-                    22.0,
-                    30.0,
-                    42.0,
-                    20.0,
-                    36.0,
-                    25.0,
-                    40.0,
-                ],
-                # Rolling averages: bonus
-                "bonus_last_1": [2, 1, 3, 0, 1, 3, 0, 2, 0, 2],
-                "bonus_last_3": [1.3, 0.7, 2.0, 0.3, 0.7, 2.3, 0.0, 1.3, 0.3, 1.7],
-                "bonus_last_5": [1.0, 0.6, 1.8, 0.2, 0.6, 2.0, 0.0, 1.2, 0.4, 1.4],
-                # Rolling averages: yellow cards
-                "yellow_cards_last_3": [
-                    0.33,
-                    0.0,
-                    0.0,
-                    0.33,
-                    0.0,
-                    0.33,
-                    0.0,
-                    0.33,
-                    0.67,
-                    0.0,
-                ],
-                "yellow_cards_last_5": [
-                    0.2,
-                    0.2,
-                    0.0,
-                    0.4,
-                    0.0,
-                    0.2,
-                    0.0,
-                    0.2,
-                    0.4,
-                    0.0,
-                ],
-                # Rolling averages: saves
-                "saves_last_3": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                "saves_last_5": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                # Rolling averages: transfers balance
-                "transfers_balance_last_3": [
-                    5000,
-                    -2000,
-                    8000,
-                    -500,
-                    3000,
-                    10000,
-                    -3000,
-                    4000,
-                    1000,
-                    6000,
-                ],
-                "transfers_balance_last_5": [
-                    4000,
-                    -1500,
-                    7000,
-                    -800,
-                    2500,
-                    9000,
-                    -2500,
-                    3500,
-                    800,
-                    5500,
-                ],
-                # Static features
-                "form_score": [8.5, 5.8, 7.9, 4.0, 6.5, 9.0, 3.5, 7.5, 5.5, 8.8],
-                "opponent_strength": [3, 4, 2, 5, 3, 2, 4, 3, 4, 2],
-                "home_away": [1, 0, 1, 0, 1, 1, 0, 1, 0, 1],
-                "chance_of_playing": [100, 75, 100, 50, 100, 100, 25, 100, 75, 100],
-                "position": [3, 4, 3, 3, 3, 4, 3, 4, 4, 4],
-                "opponent_attack_strength": [
-                    1200,
-                    1350,
-                    1100,
-                    1280,
-                    1200,
-                    1150,
-                    1300,
-                    1250,
-                    1180,
-                    1100,
-                ],
-                "opponent_defence_strength": [
-                    1250,
-                    1300,
-                    1150,
-                    1320,
-                    1200,
-                    1180,
-                    1280,
-                    1220,
-                    1200,
-                    1150,
-                ],
-                "selected_by_percent": [
-                    45.3,
-                    52.1,
-                    38.7,
-                    22.0,
-                    30.5,
-                    55.0,
-                    15.0,
-                    40.0,
-                    25.0,
-                    48.0,
-                ],
-                "now_cost": [95, 120, 75, 55, 80, 130, 45, 90, 65, 110],
-                # Derived features
-                "minutes_pct": [0.95, 0.88, 1.0, 0.7, 0.9, 1.0, 0.5, 0.95, 0.85, 1.0],
-                "form_x_difficulty": [
-                    25.5,
-                    23.2,
-                    15.8,
-                    20.0,
-                    19.5,
-                    18.0,
-                    14.0,
-                    22.5,
-                    22.0,
-                    17.6,
-                ],
-                "points_per_90": [
-                    5.5,
-                    3.8,
-                    8.2,
-                    2.5,
-                    4.8,
-                    9.5,
-                    1.8,
-                    6.2,
-                    4.0,
-                    7.5,
-                ],
-                "goal_contributions_last_3": [
-                    1.0,
-                    1.0,
-                    1.0,
-                    0.33,
-                    0.66,
-                    1.33,
-                    0.33,
-                    0.67,
-                    0.33,
-                    0.66,
-                ],
-                "points_volatility": [
-                    2.1,
-                    1.5,
-                    3.2,
-                    1.2,
-                    1.8,
-                    3.5,
-                    1.0,
-                    2.5,
-                    1.6,
-                    2.8,
-                ],
-                # Target
-                "actual_points": [8, 4, 12, 2, 6, 15, 1, 9, 5, 11],
-            }
-        )
-        model, X_test, y_test = train_model(df)
+        model, X_test, y_test = train_model(training_dataframe_10)
         return model, X_test, y_test
 
     def test_returns_expected_metrics(self, trained_model_and_data):
@@ -1150,80 +257,9 @@ class TestGetFeatureImportance:
     """Tests for get_feature_importance function."""
 
     @pytest.fixture
-    def trained_model(self):
+    def trained_model(self, training_dataframe_5):
         """Create a simple trained model."""
-        df = pd.DataFrame(
-            {
-                # Rolling averages: points
-                "points_last_1": [8.0, 4.0, 12.0, 2.0, 6.0],
-                "points_last_3": [7.3, 5.2, 8.0, 4.5, 6.7],
-                "points_last_5": [6.8, 4.9, 7.5, 4.2, 6.1],
-                # Rolling averages: goals
-                "goals_last_1": [1.0, 0.0, 0.0, 0.0, 0.0],
-                "goals_last_3": [0.67, 1.0, 0.33, 0.0, 0.33],
-                "goals_last_5": [0.6, 0.8, 0.4, 0.0, 0.2],
-                # Rolling averages: assists
-                "assists_last_1": [0.0, 0.0, 1.0, 0.0, 1.0],
-                "assists_last_3": [0.33, 0.0, 0.67, 0.33, 0.33],
-                "assists_last_5": [0.4, 0.2, 0.6, 0.2, 0.4],
-                # Rolling averages: clean sheets
-                "clean_sheets_last_1": [0, 0, 1, 0, 0],
-                "clean_sheets_last_3": [0.0, 0.0, 0.33, 0.33, 0.0],
-                "clean_sheets_last_5": [0.2, 0.0, 0.4, 0.2, 0.0],
-                # Rolling averages: BPS
-                "bps_last_1": [30.0, 25.0, 28.0, 15.0, 20.0],
-                "bps_last_3": [28.0, 32.0, 25.0, 18.0, 22.0],
-                "bps_last_5": [27.0, 30.0, 24.0, 17.0, 21.0],
-                # Rolling averages: ICT index
-                "ict_index_last_1": [88.0, 90.0, 75.0, 48.0, 62.0],
-                "ict_index_last_3": [85.3, 92.1, 78.5, 50.2, 65.0],
-                "ict_index_last_5": [82.0, 88.0, 76.0, 48.0, 62.0],
-                # Rolling averages: threat
-                "threat_last_1": [48.0, 55.0, 35.0, 22.0, 32.0],
-                "threat_last_3": [45.0, 60.0, 38.0, 25.0, 35.0],
-                "threat_last_5": [42.0, 58.0, 36.0, 24.0, 33.0],
-                # Rolling averages: creativity
-                "creativity_last_1": [58.0, 28.0, 60.0, 38.0, 50.0],
-                "creativity_last_3": [55.0, 30.0, 62.0, 40.0, 48.0],
-                "creativity_last_5": [52.0, 32.0, 58.0, 38.0, 45.0],
-                # Rolling averages: influence
-                "influence_last_1": [38.0, 42.0, 30.0, 25.0, 35.0],
-                "influence_last_3": [35.0, 40.0, 28.0, 24.0, 33.0],
-                "influence_last_5": [33.0, 38.0, 27.0, 22.0, 30.0],
-                # Rolling averages: bonus
-                "bonus_last_1": [2, 1, 3, 0, 1],
-                "bonus_last_3": [1.3, 0.7, 2.0, 0.3, 0.7],
-                "bonus_last_5": [1.0, 0.6, 1.8, 0.2, 0.6],
-                # Rolling averages: yellow cards
-                "yellow_cards_last_3": [0.33, 0.0, 0.0, 0.33, 0.0],
-                "yellow_cards_last_5": [0.2, 0.2, 0.0, 0.4, 0.0],
-                # Rolling averages: saves
-                "saves_last_3": [0.0, 0.0, 0.0, 0.0, 0.0],
-                "saves_last_5": [0.0, 0.0, 0.0, 0.0, 0.0],
-                # Rolling averages: transfers balance
-                "transfers_balance_last_3": [5000, -2000, 8000, -500, 3000],
-                "transfers_balance_last_5": [4000, -1500, 7000, -800, 2500],
-                # Static features
-                "form_score": [8.5, 5.8, 7.9, 4.0, 6.5],
-                "opponent_strength": [3, 4, 2, 5, 3],
-                "home_away": [1, 0, 1, 0, 1],
-                "chance_of_playing": [100, 75, 100, 50, 100],
-                "position": [3, 4, 3, 3, 3],
-                "opponent_attack_strength": [1200, 1350, 1100, 1280, 1200],
-                "opponent_defence_strength": [1250, 1300, 1150, 1320, 1200],
-                "selected_by_percent": [45.3, 52.1, 38.7, 22.0, 30.5],
-                "now_cost": [95, 120, 75, 55, 80],
-                # Derived features
-                "minutes_pct": [0.95, 0.88, 1.0, 0.7, 0.9],
-                "form_x_difficulty": [25.5, 23.2, 15.8, 20.0, 19.5],
-                "points_per_90": [5.5, 3.8, 8.2, 2.5, 4.8],
-                "goal_contributions_last_3": [1.0, 1.0, 1.0, 0.33, 0.66],
-                "points_volatility": [2.1, 1.5, 3.2, 1.2, 1.8],
-                # Target
-                "actual_points": [8, 4, 12, 2, 6],
-            }
-        )
-        model, _, _ = train_model(df, test_size=0.2)
+        model, _, _ = train_model(training_dataframe_5, test_size=0.2)
         return model
 
     def test_returns_all_features(self, trained_model):
@@ -1255,80 +291,9 @@ class TestSaveLoadModel:
     """Tests for save_model and load_model functions."""
 
     @pytest.fixture
-    def trained_model(self):
+    def trained_model(self, training_dataframe_5):
         """Create a simple trained model."""
-        df = pd.DataFrame(
-            {
-                # Rolling averages: points
-                "points_last_1": [8.0, 4.0, 12.0, 2.0, 6.0],
-                "points_last_3": [7.3, 5.2, 8.0, 4.5, 6.7],
-                "points_last_5": [6.8, 4.9, 7.5, 4.2, 6.1],
-                # Rolling averages: goals
-                "goals_last_1": [1.0, 0.0, 0.0, 0.0, 0.0],
-                "goals_last_3": [0.67, 1.0, 0.33, 0.0, 0.33],
-                "goals_last_5": [0.6, 0.8, 0.4, 0.0, 0.2],
-                # Rolling averages: assists
-                "assists_last_1": [0.0, 0.0, 1.0, 0.0, 1.0],
-                "assists_last_3": [0.33, 0.0, 0.67, 0.33, 0.33],
-                "assists_last_5": [0.4, 0.2, 0.6, 0.2, 0.4],
-                # Rolling averages: clean sheets
-                "clean_sheets_last_1": [0, 0, 1, 0, 0],
-                "clean_sheets_last_3": [0.0, 0.0, 0.33, 0.33, 0.0],
-                "clean_sheets_last_5": [0.2, 0.0, 0.4, 0.2, 0.0],
-                # Rolling averages: BPS
-                "bps_last_1": [30.0, 25.0, 28.0, 15.0, 20.0],
-                "bps_last_3": [28.0, 32.0, 25.0, 18.0, 22.0],
-                "bps_last_5": [27.0, 30.0, 24.0, 17.0, 21.0],
-                # Rolling averages: ICT index
-                "ict_index_last_1": [88.0, 90.0, 75.0, 48.0, 62.0],
-                "ict_index_last_3": [85.3, 92.1, 78.5, 50.2, 65.0],
-                "ict_index_last_5": [82.0, 88.0, 76.0, 48.0, 62.0],
-                # Rolling averages: threat
-                "threat_last_1": [48.0, 55.0, 35.0, 22.0, 32.0],
-                "threat_last_3": [45.0, 60.0, 38.0, 25.0, 35.0],
-                "threat_last_5": [42.0, 58.0, 36.0, 24.0, 33.0],
-                # Rolling averages: creativity
-                "creativity_last_1": [58.0, 28.0, 60.0, 38.0, 50.0],
-                "creativity_last_3": [55.0, 30.0, 62.0, 40.0, 48.0],
-                "creativity_last_5": [52.0, 32.0, 58.0, 38.0, 45.0],
-                # Rolling averages: influence
-                "influence_last_1": [38.0, 42.0, 30.0, 25.0, 35.0],
-                "influence_last_3": [35.0, 40.0, 28.0, 24.0, 33.0],
-                "influence_last_5": [33.0, 38.0, 27.0, 22.0, 30.0],
-                # Rolling averages: bonus
-                "bonus_last_1": [2, 1, 3, 0, 1],
-                "bonus_last_3": [1.3, 0.7, 2.0, 0.3, 0.7],
-                "bonus_last_5": [1.0, 0.6, 1.8, 0.2, 0.6],
-                # Rolling averages: yellow cards
-                "yellow_cards_last_3": [0.33, 0.0, 0.0, 0.33, 0.0],
-                "yellow_cards_last_5": [0.2, 0.2, 0.0, 0.4, 0.0],
-                # Rolling averages: saves
-                "saves_last_3": [0.0, 0.0, 0.0, 0.0, 0.0],
-                "saves_last_5": [0.0, 0.0, 0.0, 0.0, 0.0],
-                # Rolling averages: transfers balance
-                "transfers_balance_last_3": [5000, -2000, 8000, -500, 3000],
-                "transfers_balance_last_5": [4000, -1500, 7000, -800, 2500],
-                # Static features
-                "form_score": [8.5, 5.8, 7.9, 4.0, 6.5],
-                "opponent_strength": [3, 4, 2, 5, 3],
-                "home_away": [1, 0, 1, 0, 1],
-                "chance_of_playing": [100, 75, 100, 50, 100],
-                "position": [3, 4, 3, 3, 3],
-                "opponent_attack_strength": [1200, 1350, 1100, 1280, 1200],
-                "opponent_defence_strength": [1250, 1300, 1150, 1320, 1200],
-                "selected_by_percent": [45.3, 52.1, 38.7, 22.0, 30.5],
-                "now_cost": [95, 120, 75, 55, 80],
-                # Derived features
-                "minutes_pct": [0.95, 0.88, 1.0, 0.7, 0.9],
-                "form_x_difficulty": [25.5, 23.2, 15.8, 20.0, 19.5],
-                "points_per_90": [5.5, 3.8, 8.2, 2.5, 4.8],
-                "goal_contributions_last_3": [1.0, 1.0, 1.0, 0.33, 0.66],
-                "points_volatility": [2.1, 1.5, 3.2, 1.2, 1.8],
-                # Target
-                "actual_points": [8, 4, 12, 2, 6],
-            }
-        )
-        model, _, _ = train_model(df, test_size=0.2)
+        model, _, _ = train_model(training_dataframe_5, test_size=0.2)
         return model
 
     def test_save_to_directory(self, trained_model, tmp_path):
@@ -1361,77 +326,12 @@ class TestSaveLoadModel:
         assert isinstance(loaded_model, xgb.XGBRegressor)
         assert hasattr(loaded_model, "predict")
 
-    def test_loaded_model_produces_same_predictions(self, trained_model, tmp_path):
+    def test_loaded_model_produces_same_predictions(
+        self, trained_model, training_dataframe_5, tmp_path
+    ):
         """Test loaded model produces same predictions as original."""
-        X = pd.DataFrame(
-            {
-                # Rolling averages: points
-                "points_last_1": [7.0],
-                "points_last_3": [7.0],
-                "points_last_5": [6.5],
-                # Rolling averages: goals
-                "goals_last_1": [1.0],
-                "goals_last_3": [0.5],
-                "goals_last_5": [0.4],
-                # Rolling averages: assists
-                "assists_last_1": [0.0],
-                "assists_last_3": [0.33],
-                "assists_last_5": [0.2],
-                # Rolling averages: clean sheets
-                "clean_sheets_last_1": [0],
-                "clean_sheets_last_3": [0.0],
-                "clean_sheets_last_5": [0.2],
-                # Rolling averages: BPS
-                "bps_last_1": [28.0],
-                "bps_last_3": [25.0],
-                "bps_last_5": [24.0],
-                # Rolling averages: ICT index
-                "ict_index_last_1": [82.0],
-                "ict_index_last_3": [80.0],
-                "ict_index_last_5": [78.0],
-                # Rolling averages: threat
-                "threat_last_1": [48.0],
-                "threat_last_3": [45.0],
-                "threat_last_5": [42.0],
-                # Rolling averages: creativity
-                "creativity_last_1": [52.0],
-                "creativity_last_3": [50.0],
-                "creativity_last_5": [48.0],
-                # Rolling averages: influence
-                "influence_last_1": [36.0],
-                "influence_last_3": [34.0],
-                "influence_last_5": [32.0],
-                # Rolling averages: bonus
-                "bonus_last_1": [2],
-                "bonus_last_3": [1.3],
-                "bonus_last_5": [1.0],
-                # Rolling averages: yellow cards
-                "yellow_cards_last_3": [0.0],
-                "yellow_cards_last_5": [0.0],
-                # Rolling averages: saves
-                "saves_last_3": [0.0],
-                "saves_last_5": [0.0],
-                # Rolling averages: transfers balance
-                "transfers_balance_last_3": [3000],
-                "transfers_balance_last_5": [2500],
-                # Static features
-                "form_score": [7.5],
-                "opponent_strength": [3],
-                "home_away": [1],
-                "chance_of_playing": [100],
-                "position": [3],
-                "opponent_attack_strength": [1200],
-                "opponent_defence_strength": [1250],
-                "selected_by_percent": [40.0],
-                "now_cost": [90],
-                # Derived features
-                "minutes_pct": [0.9],
-                "form_x_difficulty": [22.5],
-                "points_per_90": [5.5],
-                "goal_contributions_last_3": [0.83],
-                "points_volatility": [2.0],
-            }
-        )
+        # Use first row of training data for prediction test
+        X = training_dataframe_5[FEATURE_COLS].iloc[[0]]
 
         original_pred = trained_model.predict(X)
 
