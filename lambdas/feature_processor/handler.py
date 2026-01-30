@@ -16,8 +16,14 @@ import pandas as pd
 from botocore.exceptions import ClientError
 
 from common.aws_clients import get_s3_client
+from common.feature_categories.fixture_features import compute_fixture_features
+from common.feature_categories.interaction_features import compute_interaction_features
+from common.feature_categories.opponent_features import compute_opponent_features
+from common.feature_categories.position_features import compute_position_features
+from common.feature_categories.team_features import compute_team_features
 from common.feature_config import (
     FEATURE_COLS,
+    compute_bootstrap_features,
     compute_derived_features,
     compute_rolling_features,
 )
@@ -149,6 +155,68 @@ def get_opponent_info(
     return 3, 0, 1200, 1200
 
 
+def get_team_fixtures(
+    fixtures: List[Dict], team_id: int, before_gw: int = None
+) -> List:
+    """Get fixtures for a specific team, optionally filtered by gameweek."""
+    team_fixtures = [
+        f for f in fixtures if f.get("team_h") == team_id or f.get("team_a") == team_id
+    ]
+    if before_gw:
+        team_fixtures = [f for f in team_fixtures if f.get("event", 0) < before_gw]
+    return sorted(team_fixtures, key=lambda x: x.get("event", 0), reverse=True)
+
+
+def get_upcoming_fixtures(
+    fixtures: List[Dict], team_id: int, current_gw: int, count: int = 5
+) -> List:
+    """Get upcoming fixtures for a team."""
+    return [
+        f
+        for f in fixtures
+        if (f.get("team_h") == team_id or f.get("team_a") == team_id)
+        and f.get("event", 0) >= current_gw
+    ][:count]
+
+
+def get_opponent_team_id(
+    player_team_id: int, fixtures: List[Dict], gameweek: int
+) -> int:
+    """Get opponent team ID from fixtures for the current gameweek."""
+    for fixture in fixtures:
+        if fixture.get("event") != gameweek:
+            continue
+        if fixture.get("team_h") == player_team_id:
+            return fixture.get("team_a")
+        elif fixture.get("team_a") == player_team_id:
+            return fixture.get("team_h")
+    return None
+
+
+def get_current_gw_fixtures(
+    fixtures: List[Dict], team_id: int, gameweek: int
+) -> List[Dict]:
+    """Get all fixtures for a team in the current gameweek."""
+    return [
+        f
+        for f in fixtures
+        if f.get("event") == gameweek
+        and (f.get("team_h") == team_id or f.get("team_a") == team_id)
+    ]
+
+
+def get_next_gw_fixtures(
+    fixtures: List[Dict], team_id: int, gameweek: int
+) -> List[Dict]:
+    """Get all fixtures for a team in the next gameweek."""
+    return [
+        f
+        for f in fixtures
+        if f.get("event") == gameweek + 1
+        and (f.get("team_h") == team_id or f.get("team_a") == team_id)
+    ]
+
+
 def engineer_features(
     bootstrap: Dict[str, Any],
     fixtures: List[Dict[str, Any]],
@@ -224,16 +292,98 @@ def engineer_features(
         # Derived features
         derived = compute_derived_features(history, rolling, static)
 
-        # Build row from rolling + static + derived
+        # Get team and opponent data for new feature categories
+        all_players = players
+        team_data = next((t for t in teams if t.get("id") == team_id), {})
+        opponent_team_id = get_opponent_team_id(team_id, fixtures, gameweek)
+        opponent_data = (
+            next((t for t in teams if t.get("id") == opponent_team_id), {})
+            if opponent_team_id
+            else {}
+        )
+
+        team_players = [p for p in all_players if p.get("team") == team_id]
+        opponent_players = (
+            [p for p in all_players if p.get("team") == opponent_team_id]
+            if opponent_team_id
+            else []
+        )
+
+        team_fixtures = get_team_fixtures(fixtures, team_id, gameweek)
+        opponent_fixtures = (
+            get_team_fixtures(fixtures, opponent_team_id, gameweek)
+            if opponent_team_id
+            else []
+        )
+        upcoming_fixtures = get_upcoming_fixtures(fixtures, team_id, gameweek)
+
+        # Get current fixture for player
+        current_fixture = next(
+            (
+                f
+                for f in fixtures
+                if f.get("event") == gameweek
+                and (f.get("team_h") == team_id or f.get("team_a") == team_id)
+            ),
+            {},
+        )
+
+        # Get fixtures for DGW/BGW detection
+        current_gw_fixtures = get_current_gw_fixtures(fixtures, team_id, gameweek)
+        next_gw_fixtures = get_next_gw_fixtures(fixtures, team_id, gameweek)
+
+        # Compute all feature categories
+        bootstrap_features = compute_bootstrap_features(player, all_players=all_players)
+
+        team_features = compute_team_features(
+            player=player,
+            team_data=team_data,
+            team_players=team_players,
+            team_fixtures=team_fixtures,
+            opponent_data=opponent_data,
+        )
+
+        opponent_features = compute_opponent_features(
+            opponent_data=opponent_data,
+            opponent_fixtures=opponent_fixtures,
+            opponent_players=opponent_players,
+            is_home=(home_away == 1),
+        )
+
+        fixture_features = compute_fixture_features(
+            player=player,
+            current_fixture=current_fixture,
+            upcoming_fixtures=upcoming_fixtures,
+            past_fixtures=team_fixtures,
+            current_gw_fixtures=current_gw_fixtures,
+            next_gw_fixtures=next_gw_fixtures,
+        )
+
+        position_features = compute_position_features(player=player, history=history)
+
+        interaction_features = compute_interaction_features(
+            player=player,
+            rolling_features=rolling,
+            fixture_features=fixture_features,
+            bootstrap_features=bootstrap_features,
+        )
+
+        # Build row from all feature categories
         row = {
             "player_id": player_id,
             "player_name": player.get("web_name", ""),
             "team_id": team_id,
             "gameweek": gameweek,
         }
-        row.update(rolling)
-        row.update(static)
-        row.update(derived)
+        row.update(rolling)  # 73 features
+        row.update(static)  # 9 features
+        row.update(bootstrap_features)  # 32 features
+        row.update(team_features)  # 28 features
+        row.update(opponent_features)  # 24 features
+        row.update(fixture_features)  # 16 features
+        row.update(position_features)  # 8 features
+        row.update(interaction_features)  # 5 features
+        row.update(derived)  # 5 features
 
         # Add actual points for historical mode (training target)
         if mode == "historical" and history:
@@ -251,6 +401,11 @@ def engineer_features(
 
     df = pd.DataFrame(features)
     logger.info(f"Engineered features for {len(df)} players")
+
+    # Validate all required features are present
+    missing = set(FEATURE_COLS) - set(df.columns)
+    if missing:
+        logger.warning(f"Missing {len(missing)} features: {sorted(missing)[:10]}...")
 
     return df
 
