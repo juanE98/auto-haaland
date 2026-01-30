@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, Mock, patch
 import pytest
 
 from lambdas.common.feature_config import (
+    FEATURE_COLS,
     calculate_minutes_pct,
     calculate_rolling_average,
 )
@@ -412,6 +413,69 @@ class TestEngineerFeatures:
         # form_x_difficulty = form_score * opponent_strength
         # 8.5 * 4 = 34.0
         assert salah["form_x_difficulty"] == pytest.approx(34.0, rel=0.01)
+
+    def test_engineer_features_produces_all_200_features(
+        self, sample_bootstrap, sample_fixtures, sample_histories
+    ):
+        """Test that engineer_features produces all 200 ML features.
+
+        This is a regression test to ensure the feature processor
+        computes all feature categories and doesn't regress to fewer features.
+        """
+        # Add fixture event data for proper opponent/fixture detection
+        fixtures_with_events = [
+            {"team_h": 10, "team_a": 1, "event": 20},  # Liverpool vs Arsenal
+            {"team_h": 2, "team_a": 11, "event": 20},  # Someone vs Man City
+        ]
+
+        df = engineer_features(
+            bootstrap=sample_bootstrap,
+            fixtures=fixtures_with_events,
+            player_histories=sample_histories,
+            mode="historical",
+            gameweek=20,
+        )
+
+        # Verify all 200 features are present
+        missing_features = set(FEATURE_COLS) - set(df.columns)
+        assert (
+            len(missing_features) == 0
+        ), f"Missing {len(missing_features)} features: {sorted(missing_features)}"
+
+        # Verify exact count (200 features + metadata columns)
+        metadata_cols = ["player_id", "player_name", "team_id", "gameweek"]
+        target_cols = ["actual_points"]
+        feature_cols_in_df = [
+            c for c in df.columns if c not in metadata_cols + target_cols
+        ]
+        assert (
+            len(feature_cols_in_df) == 200
+        ), f"Expected 200 features, got {len(feature_cols_in_df)}"
+
+    def test_engineer_features_no_history_produces_all_features(
+        self, sample_bootstrap, sample_fixtures
+    ):
+        """Test that all 200 features are produced even without player history.
+
+        Ensures the fallback paths also compute all feature categories.
+        """
+        fixtures_with_events = [
+            {"team_h": 10, "team_a": 1, "event": 10},
+            {"team_h": 2, "team_a": 11, "event": 10},
+        ]
+
+        df = engineer_features(
+            bootstrap=sample_bootstrap,
+            fixtures=fixtures_with_events,
+            player_histories={},  # No history
+            mode="prediction",
+            gameweek=10,
+        )
+
+        missing_features = set(FEATURE_COLS) - set(df.columns)
+        assert (
+            len(missing_features) == 0
+        ), f"Missing {len(missing_features)} features: {sorted(missing_features)}"
 
 
 class TestFeatureProcessorHandler:
