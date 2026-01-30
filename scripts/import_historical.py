@@ -22,8 +22,11 @@ from pathlib import Path
 import httpx
 import pandas as pd
 
-# Add project root to path for imports
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+# Add project root and lambdas/common to path for imports
+# lambdas/common is needed because feature_config uses 'from common...' for Lambda compat
+project_root = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(project_root))
+sys.path.insert(0, str(project_root / "lambdas"))
 
 from lambdas.common.feature_categories.fixture_features import (  # noqa: E402
     FIXTURE_FEATURES,
