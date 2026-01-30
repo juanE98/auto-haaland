@@ -9,7 +9,7 @@ import io
 import json
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Tuple
 
 import pandas as pd
@@ -356,7 +356,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             "mode": mode,
             "features_file": features_file,
             "rows_processed": len(df),
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         }
 
     except ClientError as e:

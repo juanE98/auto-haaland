@@ -8,7 +8,7 @@ This is the first step in the data pipeline.
 import json
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict
 
 from common.aws_clients import get_s3_client
@@ -147,7 +147,9 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 "season": season,
                 "files_saved": files_saved,
                 "files_count": len(files_saved),
-                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "timestamp": datetime.now(timezone.utc)
+                .isoformat()
+                .replace("+00:00", "Z"),
             }
 
     except FPLApiError as e:
