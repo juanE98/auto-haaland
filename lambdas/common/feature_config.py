@@ -12,11 +12,11 @@ and bump FEATURE_VERSION to ensure consistency across the pipeline.
 import math
 from typing import Any
 
-from lambdas.common.feature_categories.fixture_features import FIXTURE_FEATURES
-from lambdas.common.feature_categories.interaction_features import INTERACTION_FEATURES
-from lambdas.common.feature_categories.opponent_features import OPPONENT_FEATURES
-from lambdas.common.feature_categories.position_features import POSITION_FEATURES
-from lambdas.common.feature_categories.team_features import TEAM_FEATURES
+from common.feature_categories.fixture_features import FIXTURE_FEATURES
+from common.feature_categories.interaction_features import INTERACTION_FEATURES
+from common.feature_categories.opponent_features import OPPONENT_FEATURES
+from common.feature_categories.position_features import POSITION_FEATURES
+from common.feature_categories.team_features import TEAM_FEATURES
 
 # Feature version for tracking compatibility between components
 FEATURE_VERSION = "2.3.0"
