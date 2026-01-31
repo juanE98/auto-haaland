@@ -42,6 +42,8 @@ Resources:
           AttributeType: N
         - AttributeName: position
           AttributeType: S
+        - AttributeName: haul_probability
+          AttributeType: N
       KeySchema:
         - AttributeName: player_id
           KeyType: HASH
@@ -61,6 +63,14 @@ Resources:
             - AttributeName: position
               KeyType: HASH
             - AttributeName: predicted_points
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: gameweek-haul-index
+          KeySchema:
+            - AttributeName: gameweek
+              KeyType: HASH
+            - AttributeName: haul_probability
               KeyType: RANGE
           Projection:
             ProjectionType: ALL

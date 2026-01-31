@@ -216,25 +216,31 @@ def get_top_predictions():
 
     table = get_table()
 
-    # Fetch more items to account for filtering and re-sorting
-    fetch_limit = limit * 5
+    # Choose index based on sort order
+    if sort_by == "haul":
+        index_name = "gameweek-haul-index"
+    else:
+        index_name = "gameweek-points-index"
+
+    # Fetch more items to account for filtering (unavailable players, position)
+    fetch_limit = limit * 3
 
     if position:
+        # Position filter requires fetching from gameweek index and filtering
         response = table.query(
-            IndexName="position-points-index",
-            KeyConditionExpression=Key("position").eq(position),
-            FilterExpression=Key("gameweek").eq(gameweek),
+            IndexName=index_name,
+            KeyConditionExpression=Key("gameweek").eq(gameweek),
             ScanIndexForward=False,
-            Limit=fetch_limit,
+            Limit=fetch_limit * 3,  # Fetch more since filtering by position
         )
         items = [
             item
             for item in response.get("Items", [])
-            if item.get("gameweek") == gameweek
+            if item.get("position") == position
         ]
     else:
         response = table.query(
-            IndexName="gameweek-points-index",
+            IndexName=index_name,
             KeyConditionExpression=Key("gameweek").eq(gameweek),
             ScanIndexForward=False,
             Limit=fetch_limit,
@@ -244,13 +250,6 @@ def get_top_predictions():
     # Filter out unavailable players (chance_of_playing = 0)
     if available_only:
         items = [item for item in items if item.get("chance_of_playing", 100) > 0]
-
-    # Re-sort if sorting by haul probability
-    if sort_by == "haul":
-        items.sort(
-            key=lambda x: float(x.get("haul_probability", 0)),
-            reverse=True,
-        )
 
     # Apply final limit
     items = items[:limit]
