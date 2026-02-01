@@ -171,24 +171,32 @@ Resources:
             RestApiId: !Ref FPLApi
             Path: /predictions
             Method: GET
+            Auth:
+              ApiKeyRequired: true
         GetPlayerPrediction:
           Type: Api
           Properties:
             RestApiId: !Ref FPLApi
             Path: /predictions/{player_id}
             Method: GET
+            Auth:
+              ApiKeyRequired: true
         GetTop:
           Type: Api
           Properties:
             RestApiId: !Ref FPLApi
             Path: /top
             Method: GET
+            Auth:
+              ApiKeyRequired: true
         Compare:
           Type: Api
           Properties:
             RestApiId: !Ref FPLApi
             Path: /compare
             Method: GET
+            Auth:
+              ApiKeyRequired: true
 
   # Step Functions State Machine
   FPLPipelineStateMachine:
@@ -233,8 +241,6 @@ Resources:
     Properties:
       Name: !Sub "fpl-api-${Environment}"
       StageName: !Ref Environment
-      Auth:
-        ApiKeyRequired: true
       MethodSettings:
         - ResourcePath: "/*"
           HttpMethod: "*"
