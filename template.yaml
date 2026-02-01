@@ -9,6 +9,10 @@ Parameters:
     AllowedValues:
       - dev
       - prod
+  CorsAllowOrigin:
+    Type: String
+    Default: "*"
+    Description: "CORS allowed origin for API requests"
 
 Globals:
   Function:
@@ -156,6 +160,7 @@ Resources:
       Environment:
         Variables:
           TABLE_NAME: !Ref FPLPredictionsTable
+          CORS_ALLOW_ORIGIN: !Ref CorsAllowOrigin
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref FPLPredictionsTable
@@ -228,15 +233,52 @@ Resources:
     Properties:
       Name: !Sub "fpl-api-${Environment}"
       StageName: !Ref Environment
+      Auth:
+        ApiKeyRequired: true
       MethodSettings:
         - ResourcePath: "/*"
           HttpMethod: "*"
           ThrottlingBurstLimit: 100
           ThrottlingRateLimit: 50
       Cors:
-        AllowOrigin: "'*'"
-        AllowHeaders: "'Content-Type'"
+        AllowOrigin: !Sub "'${CorsAllowOrigin}'"
+        AllowHeaders: "'Content-Type,X-Api-Key'"
         AllowMethods: "'GET,OPTIONS'"
+
+  # API Key
+  FPLApiKey:
+    Type: AWS::ApiGateway::ApiKey
+    Properties:
+      Name: !Sub "fpl-api-key-${Environment}"
+      Description: !Sub "API key for FPL predictions API (${Environment})"
+      Enabled: true
+      StageKeys:
+        - RestApiId: !Ref FPLApi
+          StageName: !Ref Environment
+
+  # Usage Plan with rate limiting
+  FPLApiUsagePlan:
+    Type: AWS::ApiGateway::UsagePlan
+    Properties:
+      UsagePlanName: !Sub "fpl-usage-plan-${Environment}"
+      Description: !Sub "Usage plan for FPL API (${Environment})"
+      ApiStages:
+        - ApiId: !Ref FPLApi
+          Stage: !Ref Environment
+      Throttle:
+        BurstLimit: 20
+        RateLimit: 10
+      Quota:
+        Limit: 10000
+        Period: MONTH
+
+  # Link API Key to Usage Plan
+  FPLApiUsagePlanKey:
+    Type: AWS::ApiGateway::UsagePlanKey
+    Properties:
+      KeyId: !Ref FPLApiKey
+      KeyType: API_KEY
+      UsagePlanId: !Ref FPLApiUsagePlan
 
 Outputs:
   ApiEndpoint:
@@ -258,3 +300,7 @@ Outputs:
   AlertTopicArn:
     Description: SNS Topic ARN for alerts
     Value: !Ref AlertTopic
+
+  ApiKeyValue:
+    Description: "API Key value (add to frontend X-Api-Key header)"
+    Value: !GetAtt FPLApiKey.APIKey

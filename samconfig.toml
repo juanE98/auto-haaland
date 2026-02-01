@@ -20,7 +20,7 @@ resolve_image_repos = true
 [dev.deploy.parameters]
 stack_name = "auto-haaland-dev"
 region = "ap-southeast-2"
-parameter_overrides = "Environment=dev"
+parameter_overrides = "Environment=dev CorsAllowOrigin=*"
 confirm_changeset = false
 resolve_s3 = true
 resolve_image_repos = true
@@ -31,7 +31,7 @@ tags = "Project=auto-haaland Environment=dev"
 [prod.deploy.parameters]
 stack_name = "auto-haaland-prod"
 region = "ap-southeast-2"
-parameter_overrides = "Environment=prod"
+parameter_overrides = "Environment=prod CorsAllowOrigin=https://juane98.github.io"
 confirm_changeset = true
 resolve_s3 = true
 resolve_image_repos = true

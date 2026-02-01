@@ -29,8 +29,8 @@ from common.aws_clients import get_dynamodb_resource
 
 logger = Logger(service="fpl-api")
 cors_config = CORSConfig(
-    allow_origin="*",
-    allow_headers=["Content-Type"],
+    allow_origin=os.getenv("CORS_ALLOW_ORIGIN", "*"),
+    allow_headers=["Content-Type", "X-Api-Key"],
     max_age=300,
 )
 app = APIGatewayRestResolver(cors=cors_config)
