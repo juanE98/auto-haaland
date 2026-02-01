@@ -301,6 +301,6 @@ Outputs:
     Description: SNS Topic ARN for alerts
     Value: !Ref AlertTopic
 
-  ApiKeyValue:
-    Description: "API Key value (add to frontend X-Api-Key header)"
-    Value: !GetAtt FPLApiKey.APIKey
+  ApiKeyId:
+    Description: "API Key ID (use AWS CLI to get value: aws apigateway get-api-key --api-key <id> --include-value)"
+    Value: !Ref FPLApiKey
