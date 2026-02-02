@@ -1,4 +1,7 @@
-.PHONY: setup install test test-unit test-integration local-up local-down local-api local-logs clean help import-historical backfill train-local train-and-upload top haul player compare predictions run-pipeline lint format
+.PHONY: setup install test test-unit test-integration local-up local-down local-api local-logs clean help import-historical backfill train-local train-and-upload top haul player compare predictions run-pipeline lint format deploy-prod
+
+# Environment: dev (default) or prod
+ENV ?= dev
 
 # Helper for comma in $(if ...) expansions
 comma := ,
@@ -6,6 +9,10 @@ comma := ,
 # Default target
 help:
 	@echo "Auto-Haaland FPL ML System - Development Commands"
+	@echo ""
+	@echo "Environment: ENV=dev (default) or ENV=prod"
+	@echo "  Example: make train-and-upload ENV=prod"
+	@echo "  Example: make run-pipeline ENV=prod GW=23"
 	@echo ""
 	@echo "Setup:"
 	@echo "  make setup          - Install development dependencies"
@@ -46,6 +53,7 @@ help:
 	@echo "AWS Deployment:"
 	@echo "  make build          - Build SAM application"
 	@echo "  make deploy-dev     - Deploy to dev environment"
+	@echo "  make deploy-prod    - Deploy to prod environment"
 	@echo ""
 	@echo "Cleanup:"
 	@echo "  make clean          - Remove build artifacts and caches"
@@ -102,11 +110,11 @@ train-local:
 	venv/bin/python sagemaker/train_local.py --data-dir data/ --output-path models/ --train-haul-classifier
 
 train-and-upload:
-	@echo "Training models and uploading to S3..."
-	venv/bin/python sagemaker/train_local.py --data-dir data/ --output-path models/ --upload-s3 --bucket fpl-ml-data-dev --train-haul-classifier
+	@echo "Training models and uploading to S3 ($(ENV))..."
+	venv/bin/python sagemaker/train_local.py --data-dir data/ --output-path models/ --upload-s3 --bucket fpl-ml-data-$(ENV) --train-haul-classifier
 
-API_ENDPOINT ?= $(shell aws ssm get-parameter --name /auto-haaland/dev/api-endpoint --query Parameter.Value --output text --region ap-southeast-2 2>/dev/null)
-STATE_MACHINE_ARN ?= $(shell aws ssm get-parameter --name /auto-haaland/dev/state-machine-arn --query Parameter.Value --output text --region ap-southeast-2 2>/dev/null)
+API_ENDPOINT ?= $(shell aws ssm get-parameter --name /auto-haaland/$(ENV)/api-endpoint --query Parameter.Value --output text --region ap-southeast-2 2>/dev/null)
+STATE_MACHINE_ARN ?= $(shell aws ssm get-parameter --name /auto-haaland/$(ENV)/state-machine-arn --query Parameter.Value --output text --region ap-southeast-2 2>/dev/null)
 top:
 ifndef GW
 	$(error GW is required. Usage: make top GW=22)
@@ -173,6 +181,10 @@ build:
 deploy-dev:
 	@echo "Deploying to dev environment..."
 	sam deploy --config-env dev --resolve-image-repos
+
+deploy-prod:
+	@echo "Deploying to prod environment..."
+	sam deploy --config-env prod --resolve-image-repos
 
 clean:
 	@echo "Cleaning build artifacts..."
