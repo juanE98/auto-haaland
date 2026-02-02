@@ -171,32 +171,24 @@ Resources:
             RestApiId: !Ref FPLApi
             Path: /predictions
             Method: GET
-            Auth:
-              ApiKeyRequired: true
         GetPlayerPrediction:
           Type: Api
           Properties:
             RestApiId: !Ref FPLApi
             Path: /predictions/{player_id}
             Method: GET
-            Auth:
-              ApiKeyRequired: true
         GetTop:
           Type: Api
           Properties:
             RestApiId: !Ref FPLApi
             Path: /top
             Method: GET
-            Auth:
-              ApiKeyRequired: true
         Compare:
           Type: Api
           Properties:
             RestApiId: !Ref FPLApi
             Path: /compare
             Method: GET
-            Auth:
-              ApiKeyRequired: true
 
   # Step Functions State Machine
   FPLPipelineStateMachine:
@@ -248,43 +240,8 @@ Resources:
           ThrottlingRateLimit: 50
       Cors:
         AllowOrigin: !Sub "'${CorsAllowOrigin}'"
-        AllowHeaders: "'Content-Type,X-Api-Key'"
+        AllowHeaders: "'Content-Type'"
         AllowMethods: "'GET,OPTIONS'"
-
-  # API Key
-  FPLApiKey:
-    Type: AWS::ApiGateway::ApiKey
-    Properties:
-      Name: !Sub "fpl-api-key-${Environment}"
-      Description: !Sub "API key for FPL predictions API (${Environment})"
-      Enabled: true
-      StageKeys:
-        - RestApiId: !Ref FPLApi
-          StageName: !Ref Environment
-
-  # Usage Plan with rate limiting
-  FPLApiUsagePlan:
-    Type: AWS::ApiGateway::UsagePlan
-    Properties:
-      UsagePlanName: !Sub "fpl-usage-plan-${Environment}"
-      Description: !Sub "Usage plan for FPL API (${Environment})"
-      ApiStages:
-        - ApiId: !Ref FPLApi
-          Stage: !Ref Environment
-      Throttle:
-        BurstLimit: 20
-        RateLimit: 10
-      Quota:
-        Limit: 10000
-        Period: MONTH
-
-  # Link API Key to Usage Plan
-  FPLApiUsagePlanKey:
-    Type: AWS::ApiGateway::UsagePlanKey
-    Properties:
-      KeyId: !Ref FPLApiKey
-      KeyType: API_KEY
-      UsagePlanId: !Ref FPLApiUsagePlan
 
 Outputs:
   ApiEndpoint:
@@ -306,7 +263,3 @@ Outputs:
   AlertTopicArn:
     Description: SNS Topic ARN for alerts
     Value: !Ref AlertTopic
-
-  ApiKeyId:
-    Description: "API Key ID (use AWS CLI to get value: aws apigateway get-api-key --api-key <id> --include-value)"
-    Value: !Ref FPLApiKey
