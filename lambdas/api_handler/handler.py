@@ -5,6 +5,7 @@ Provides REST API endpoints for querying FPL predictions from DynamoDB.
 Uses AWS Lambda Powertools for routing and structured logging.
 
 Endpoints:
+    GET /gameweek/latest                   - Latest gameweek with predictions
     GET /predictions?gameweek=20           - All predictions for a gameweek
     GET /predictions/{player_id}?gw=20     - Prediction for specific player
     GET /top?gameweek=20&position=MID&limit=10  - Top predicted scorers
@@ -63,6 +64,35 @@ def decimal_to_float(obj: Any) -> Any:
     elif isinstance(obj, list):
         return [decimal_to_float(item) for item in obj]
     return obj
+
+
+@app.get("/gameweek/latest")
+def get_latest_gameweek():
+    """
+    Get the latest gameweek with predictions.
+
+    Returns:
+        {"gameweek": int}
+    """
+    logger.info("Getting latest gameweek")
+
+    table = get_table()
+
+    # Scan with projection to only get gameweek values (minimises read cost)
+    response = table.scan(
+        ProjectionExpression="gameweek",
+        Limit=1000,
+    )
+
+    items = response.get("Items", [])
+    if not items:
+        raise NotFoundError("No predictions found")
+
+    # Find max gameweek from results
+    gameweeks = {int(item["gameweek"]) for item in items}
+    latest = max(gameweeks)
+
+    return {"gameweek": latest}
 
 
 @app.get("/predictions")
