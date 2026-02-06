@@ -18,8 +18,8 @@ from pathlib import Path
 
 import pandas as pd
 import xgboost as xgb
-from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.model_selection import train_test_split
 
 logging.basicConfig(
     level=logging.INFO,
@@ -293,6 +293,20 @@ def parse_args():
     parser.add_argument("--test-size", type=float, default=0.2)
     parser.add_argument("--random-state", type=int, default=42)
 
+    # Split strategy
+    split_group = parser.add_mutually_exclusive_group()
+    split_group.add_argument(
+        "--temporal-split",
+        action="store_true",
+        default=True,
+        help="Use temporal train/test split (default)",
+    )
+    split_group.add_argument(
+        "--random-split",
+        action="store_true",
+        help="Use random train/test split instead of temporal",
+    )
+
     # SageMaker specific
     parser.add_argument("--model-dir", type=str, default=SM_MODEL_DIR)
     parser.add_argument("--train", type=str, default=SM_CHANNEL_TRAINING)
@@ -341,6 +355,33 @@ def validate_data(df: pd.DataFrame) -> None:
         raise ValueError(f"Missing target column: {TARGET_COL}")
 
 
+def _temporal_train_test_split(
+    df: pd.DataFrame,
+    test_fraction: float = 0.2,
+) -> tuple:
+    """
+    Split data chronologically using season and gameweek columns.
+
+    Args:
+        df: DataFrame with 'season' and 'gameweek' columns.
+        test_fraction: Fraction of data to hold out for testing.
+
+    Returns:
+        Tuple of (train_df, test_df).
+    """
+    df = df.copy()
+    df["_sort_key"] = (
+        df["season"].astype(str) + "_" + df["gameweek"].astype(str).str.zfill(2)
+    )
+    df = df.sort_values("_sort_key").reset_index(drop=True)
+
+    split_idx = int(len(df) * (1 - test_fraction))
+    train_df = df.iloc[:split_idx].drop(columns=["_sort_key"])
+    test_df = df.iloc[split_idx:].drop(columns=["_sort_key"])
+
+    return train_df, test_df
+
+
 def train(args):
     """Main training function."""
     logger.info("Starting SageMaker training job")
@@ -348,6 +389,8 @@ def train(args):
         f"Hyperparameters: n_estimators={args.n_estimators}, "
         f"max_depth={args.max_depth}, learning_rate={args.learning_rate}"
     )
+
+    use_temporal = not args.random_split
 
     # Load data
     df = load_training_data(args.train)
@@ -363,9 +406,30 @@ def train(args):
     )
 
     # Train-test split
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=args.test_size, random_state=args.random_state
-    )
+    has_temporal = "gameweek" in df.columns and "season" in df.columns
+
+    if use_temporal and has_temporal:
+        train_df, test_df = _temporal_train_test_split(df, args.test_size)
+        X_train = train_df[FEATURE_COLS]
+        y_train = train_df[TARGET_COL]
+        X_test = test_df[FEATURE_COLS]
+        y_test = test_df[TARGET_COL]
+
+        train_gws = sorted(train_df["gameweek"].unique())
+        test_gws = sorted(test_df["gameweek"].unique())
+        logger.info("Using temporal train/test split")
+        logger.info(f"  Train GWs: {train_gws[0]}-{train_gws[-1]}")
+        logger.info(f"  Test GWs: {test_gws[0]}-{test_gws[-1]}")
+    else:
+        if use_temporal and not has_temporal:
+            logger.warning(
+                "Columns 'gameweek' and/or 'season' not found. "
+                "Falling back to random split."
+            )
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=args.test_size, random_state=args.random_state
+        )
+        logger.info("Using random train/test split")
 
     logger.info(f"Train samples: {len(X_train)}, Test samples: {len(X_test)}")
 

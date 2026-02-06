@@ -7,9 +7,11 @@ and validation before deploying to SageMaker. Running locally costs $0.
 Usage:
     python sagemaker/train_local.py --data-path path/to/features.parquet
     python sagemaker/train_local.py --data-dir path/to/parquet/dir --output-path models/
+    python sagemaker/train_local.py --data-dir data/ --tune --n-trials 50
 """
 
 import argparse
+import json
 import logging
 import os
 import sys
@@ -176,6 +178,228 @@ def train_model(
     return model, X_test, y_test
 
 
+def _has_temporal_columns(df: pd.DataFrame) -> bool:
+    """Check whether the DataFrame contains gameweek and season columns."""
+    return "gameweek" in df.columns and "season" in df.columns
+
+
+def _temporal_train_test_split(
+    df: pd.DataFrame,
+    test_fraction: float = 0.2,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Split data chronologically using season and gameweek columns.
+
+    Earlier gameweeks form the training set, later gameweeks form the test set.
+    This mirrors real-world usage where predictions are always forward-looking.
+
+    Args:
+        df: DataFrame with 'season' and 'gameweek' columns.
+        test_fraction: Fraction of data to hold out for testing.
+
+    Returns:
+        Tuple of (train_df, test_df).
+    """
+    # Create sort key from (season, gameweek) for chronological ordering
+    df = df.copy()
+    df["_sort_key"] = (
+        df["season"].astype(str) + "_" + df["gameweek"].astype(str).str.zfill(2)
+    )
+    df = df.sort_values("_sort_key").reset_index(drop=True)
+
+    split_idx = int(len(df) * (1 - test_fraction))
+    train_df = df.iloc[:split_idx].drop(columns=["_sort_key"])
+    test_df = df.iloc[split_idx:].drop(columns=["_sort_key"])
+
+    return train_df, test_df
+
+
+def train_model_temporal(
+    df: pd.DataFrame,
+    hyperparams: Optional[dict] = None,
+    test_fraction: float = 0.2,
+) -> tuple[xgb.XGBRegressor, pd.DataFrame, pd.Series, dict]:
+    """
+    Train an XGBoost regression model using temporal train/test split.
+
+    Splits data chronologically so earlier gameweeks train the model and
+    later gameweeks are used for evaluation. Falls back to random split
+    if gameweek/season columns are missing.
+
+    Args:
+        df: DataFrame with features, target, and optionally gameweek/season.
+        hyperparams: XGBoost hyperparameters (uses defaults if None).
+        test_fraction: Fraction of data to hold out for testing.
+
+    Returns:
+        Tuple of (trained model, test features, test target, split_info dict).
+    """
+    validate_features(df)
+
+    params = DEFAULT_HYPERPARAMS.copy()
+    if hyperparams:
+        params.update(hyperparams)
+
+    if not _has_temporal_columns(df):
+        logger.warning(
+            "Columns 'gameweek' and/or 'season' not found. "
+            "Falling back to random split."
+        )
+        model, X_test, y_test = train_model(
+            df, hyperparams=hyperparams, test_size=test_fraction
+        )
+        split_info = {"split_type": "random", "test_fraction": test_fraction}
+        return model, X_test, y_test, split_info
+
+    train_df, test_df = _temporal_train_test_split(df, test_fraction)
+
+    X_train = train_df[FEATURE_COLS]
+    y_train = train_df[TARGET_COL]
+    X_test = test_df[FEATURE_COLS]
+    y_test = test_df[TARGET_COL]
+
+    # Log split details
+    train_seasons = sorted(train_df["season"].unique())
+    test_seasons = sorted(test_df["season"].unique())
+    train_gws = sorted(train_df["gameweek"].unique())
+    test_gws = sorted(test_df["gameweek"].unique())
+
+    logger.info(f"Temporal split: {len(X_train)} train / {len(X_test)} test samples")
+    logger.info(
+        f"  Train seasons: {train_seasons}, GWs: {train_gws[0]}-{train_gws[-1]}"
+    )
+    logger.info(f"  Test seasons: {test_seasons}, GWs: {test_gws[0]}-{test_gws[-1]}")
+    logger.info(f"Training data shape: {X_train.shape}")
+    logger.info(
+        f"Target distribution: mean={y_train.mean():.2f}, std={y_train.std():.2f}"
+    )
+
+    model = xgb.XGBRegressor(**params)
+    model.fit(
+        X_train,
+        y_train,
+        eval_set=[(X_test, y_test)],
+        verbose=False,
+    )
+
+    split_info = {
+        "split_type": "temporal",
+        "test_fraction": test_fraction,
+        "train_samples": len(X_train),
+        "test_samples": len(X_test),
+        "train_seasons": train_seasons,
+        "test_seasons": test_seasons,
+    }
+
+    logger.info("Model training complete (temporal split)")
+    return model, X_test, y_test, split_info
+
+
+def tune_hyperparameters(
+    df: pd.DataFrame,
+    n_trials: int = 50,
+    test_fraction: float = 0.2,
+    temporal: bool = True,
+) -> dict:
+    """
+    Use Optuna to search for optimal XGBoost hyperparameters.
+
+    Minimises MAE on the validation set using either temporal or random split.
+
+    Args:
+        df: DataFrame with features and target.
+        n_trials: Number of Optuna trials to run.
+        test_fraction: Fraction of data to hold out for validation.
+        temporal: Use temporal split if True and columns are available.
+
+    Returns:
+        Dictionary of best hyperparameters.
+    """
+    try:
+        import optuna
+    except ImportError:
+        raise ImportError(
+            "Optuna is required for hyperparameter tuning. "
+            "Install with: pip install optuna"
+        )
+
+    validate_features(df)
+
+    # Prepare train/test split
+    use_temporal = temporal and _has_temporal_columns(df)
+
+    if use_temporal:
+        train_df, test_df = _temporal_train_test_split(df, test_fraction)
+        X_train = train_df[FEATURE_COLS]
+        y_train = train_df[TARGET_COL]
+        X_test = test_df[FEATURE_COLS]
+        y_test = test_df[TARGET_COL]
+        logger.info(
+            f"Tuning with temporal split: {len(X_train)} train / "
+            f"{len(X_test)} test samples"
+        )
+    else:
+        if temporal:
+            logger.warning(
+                "Columns 'gameweek' and/or 'season' not found. "
+                "Falling back to random split for tuning."
+            )
+        X = df[FEATURE_COLS]
+        y = df[TARGET_COL]
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=test_fraction, random_state=42
+        )
+        logger.info(
+            f"Tuning with random split: {len(X_train)} train / "
+            f"{len(X_test)} test samples"
+        )
+
+    def objective(trial):
+        params = {
+            "objective": "reg:squarederror",
+            "n_estimators": trial.suggest_int("n_estimators", 100, 500),
+            "max_depth": trial.suggest_int("max_depth", 3, 8),
+            "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.3, log=True),
+            "min_child_weight": trial.suggest_int("min_child_weight", 1, 10),
+            "subsample": trial.suggest_float("subsample", 0.6, 1.0),
+            "colsample_bytree": trial.suggest_float("colsample_bytree", 0.5, 1.0),
+            "reg_alpha": trial.suggest_float("reg_alpha", 1e-8, 10.0, log=True),
+            "reg_lambda": trial.suggest_float("reg_lambda", 1e-8, 10.0, log=True),
+            "gamma": trial.suggest_float("gamma", 1e-8, 1.0, log=True),
+            "random_state": 42,
+        }
+
+        model = xgb.XGBRegressor(**params)
+        model.fit(
+            X_train,
+            y_train,
+            eval_set=[(X_test, y_test)],
+            verbose=False,
+        )
+
+        predictions = model.predict(X_test)
+        mae = mean_absolute_error(y_test, predictions)
+        return mae
+
+    # Suppress Optuna's default logging to reduce noise
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
+
+    study = optuna.create_study(direction="minimize")
+    logger.info(f"Starting hyperparameter tuning ({n_trials} trials)...")
+    study.optimize(objective, n_trials=n_trials)
+
+    best_params = study.best_params
+    best_params["objective"] = "reg:squarederror"
+    best_params["random_state"] = 42
+
+    logger.info(f"Best trial MAE: {study.best_value:.3f}")
+    logger.info("Best hyperparameters:")
+    for key, value in sorted(best_params.items()):
+        logger.info(f"  {key}: {value}")
+
+    return best_params
+
+
 def evaluate_model(
     model: xgb.XGBRegressor,
     X_test: pd.DataFrame,
@@ -312,8 +536,8 @@ def train_haul_classifier(
 
     logger.info(f"Train set: {len(X_train)} samples, Test set: {len(X_test)} samples")
     logger.info(
-        f"Train haul rate: {y_train.mean()*100:.2f}%, "
-        f"Test haul rate: {y_test.mean()*100:.2f}%"
+        f"Train haul rate: {y_train.mean() * 100:.2f}%, "
+        f"Test haul rate: {y_test.mean() * 100:.2f}%"
     )
 
     model = xgb.XGBClassifier(**params)
@@ -469,10 +693,39 @@ def main():
         help="Points threshold for haul classification (default: 8)",
     )
 
+    # Split strategy
+    split_group = parser.add_mutually_exclusive_group()
+    split_group.add_argument(
+        "--temporal-split",
+        action="store_true",
+        default=True,
+        help="Use temporal train/test split (default)",
+    )
+    split_group.add_argument(
+        "--random-split",
+        action="store_true",
+        help="Use random train/test split instead of temporal",
+    )
+
+    # Hyperparameter tuning
+    parser.add_argument(
+        "--tune",
+        action="store_true",
+        help="Run Optuna hyperparameter tuning before training",
+    )
+    parser.add_argument(
+        "--n-trials",
+        type=int,
+        default=50,
+        help="Number of Optuna tuning trials (default: 50)",
+    )
+
     args = parser.parse_args()
 
     if not args.data_path and not args.data_dir:
         parser.error("Either --data-path or --data-dir is required")
+
+    use_temporal = not args.random_split
 
     # Build hyperparameters from CLI args
     hyperparams = {
@@ -485,10 +738,47 @@ def main():
     df = load_training_data(data_path=args.data_path, data_dir=args.data_dir)
     logger.info(f"Loaded {len(df)} training samples")
 
+    # Run hyperparameter tuning if requested
+    if args.tune:
+        logger.info("=" * 50)
+        logger.info("Hyperparameter Tuning")
+        logger.info("=" * 50)
+        best_params = tune_hyperparameters(
+            df,
+            n_trials=args.n_trials,
+            test_fraction=args.test_size,
+            temporal=use_temporal,
+        )
+        # Override CLI hyperparams with tuned values
+        hyperparams = {
+            k: v
+            for k, v in best_params.items()
+            if k not in ("objective", "random_state")
+        }
+
+        # Save best params to output directory
+        output_dir = Path(args.output_path)
+        if output_dir.suffix != "":
+            output_dir = output_dir.parent
+        output_dir.mkdir(parents=True, exist_ok=True)
+        params_path = output_dir / "best_params.json"
+        with open(params_path, "w") as f:
+            json.dump(best_params, f, indent=2)
+        logger.info(f"Best parameters saved to {params_path}")
+
+        logger.info("=" * 50)
+        logger.info("Training Final Model with Best Parameters")
+        logger.info("=" * 50)
+
     # Train model
-    model, X_test, y_test = train_model(
-        df, hyperparams=hyperparams, test_size=args.test_size
-    )
+    if use_temporal:
+        model, X_test, y_test, split_info = train_model_temporal(
+            df, hyperparams=hyperparams, test_fraction=args.test_size
+        )
+    else:
+        model, X_test, y_test = train_model(
+            df, hyperparams=hyperparams, test_size=args.test_size
+        )
 
     # Evaluate
     metrics = evaluate_model(model, X_test, y_test)

@@ -466,6 +466,11 @@ def generate_training_dataframe(n_samples: int = 10):
     # Add target column
     data[TARGET_COL] = np.random.randint(0, 15, n_samples)
 
+    # Add temporal metadata columns for temporal split support
+    seasons = ["2022-23", "2023-24"]
+    data["season"] = [seasons[i % len(seasons)] for i in range(n_samples)]
+    data["gameweek"] = [(i % 38) + 1 for i in range(n_samples)]
+
     return pd.DataFrame(data)
 
 

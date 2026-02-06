@@ -385,7 +385,31 @@ def run(state_machine: str | None, region: str):
     default="fpl-ml-data-dev",
     help="S3 bucket for model upload (default: fpl-ml-data-dev)",
 )
-def train(data_dir: str, output_path: str, upload_s3: bool, bucket: str):
+@click.option(
+    "--temporal-split/--random-split",
+    default=True,
+    help="Use temporal or random train/test split (default: temporal)",
+)
+@click.option(
+    "--tune",
+    is_flag=True,
+    help="Run Optuna hyperparameter tuning before training",
+)
+@click.option(
+    "--n-trials",
+    type=int,
+    default=50,
+    help="Number of Optuna tuning trials (default: 50)",
+)
+def train(
+    data_dir: str,
+    output_path: str,
+    upload_s3: bool,
+    bucket: str,
+    temporal_split: bool,
+    tune: bool,
+    n_trials: int,
+):
     """Train XGBoost model locally and optionally upload to S3."""
     cmd = [
         sys.executable,
@@ -395,6 +419,12 @@ def train(data_dir: str, output_path: str, upload_s3: bool, bucket: str):
         "--output-path",
         output_path,
     ]
+    if temporal_split:
+        cmd.append("--temporal-split")
+    else:
+        cmd.append("--random-split")
+    if tune:
+        cmd.extend(["--tune", "--n-trials", str(n_trials)])
     if upload_s3:
         cmd.extend(["--upload-s3", "--bucket", bucket])
 

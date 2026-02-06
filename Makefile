@@ -1,4 +1,4 @@
-.PHONY: setup install test test-unit test-integration local-up local-down local-api local-logs clean help import-historical backfill train-local train-and-upload top haul player compare predictions run-pipeline lint format deploy-prod
+.PHONY: setup install test test-unit test-integration local-up local-down local-api local-logs clean help import-historical backfill train-local train-and-upload tune top haul player compare predictions run-pipeline lint format deploy-prod
 
 # Environment: dev (default) or prod
 ENV ?= dev
@@ -32,8 +32,9 @@ help:
 	@echo "Data & Training:"
 	@echo "  make import-historical - Import historical data from GitHub"
 	@echo "  make backfill          - Backfill current season from FPL API"
-	@echo "  make train-local       - Train XGBoost model locally"
+	@echo "  make train-local       - Train XGBoost model locally (temporal split)"
 	@echo "  make train-and-upload  - Train locally and upload model to S3"
+	@echo "  make tune              - Tune hyperparameters with Optuna"
 	@echo ""
 	@echo "CLI Queries (GW is required):"
 	@echo "  make top GW=22                 - Top 10 predicted scorers for gameweek"
@@ -106,12 +107,16 @@ backfill:
 	venv/bin/python scripts/backfill_current_season.py --output-dir data/current/ $(if $(END_GW),--end-gw $(END_GW),)
 
 train-local:
-	@echo "Training models locally..."
-	venv/bin/python sagemaker/train_local.py --data-dir data/ --output-path models/ --train-haul-classifier
+	@echo "Training models locally (temporal split)..."
+	venv/bin/python sagemaker/train_local.py --data-dir data/ --output-path models/ --temporal-split --train-haul-classifier
+
+tune:
+	@echo "Tuning hyperparameters with Optuna..."
+	venv/bin/python sagemaker/train_local.py --data-dir data/ --output-path models/ --temporal-split --tune --n-trials $(or $(N_TRIALS),50) --train-haul-classifier
 
 train-and-upload:
 	@echo "Training models and uploading to S3 ($(ENV))..."
-	venv/bin/python sagemaker/train_local.py --data-dir data/ --output-path models/ --upload-s3 --bucket fpl-ml-data-$(ENV) --train-haul-classifier
+	venv/bin/python sagemaker/train_local.py --data-dir data/ --output-path models/ --temporal-split --upload-s3 --bucket fpl-ml-data-$(ENV) --train-haul-classifier
 
 API_ENDPOINT ?= $(shell aws ssm get-parameter --name /auto-haaland/$(ENV)/api-endpoint --query Parameter.Value --output text --region ap-southeast-2 2>/dev/null)
 STATE_MACHINE_ARN ?= $(shell aws ssm get-parameter --name /auto-haaland/$(ENV)/state-machine-arn --query Parameter.Value --output text --region ap-southeast-2 2>/dev/null)

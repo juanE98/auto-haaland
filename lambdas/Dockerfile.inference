@@ -6,4 +6,7 @@ RUN pip install --no-cache-dir -r ${LAMBDA_TASK_ROOT}/requirements.txt
 COPY common/ ${LAMBDA_TASK_ROOT}/common/
 COPY inference/ ${LAMBDA_TASK_ROOT}/inference/
 
+# Fix file permissions for Lambda runtime
+RUN chmod -R 755 ${LAMBDA_TASK_ROOT}/common/ ${LAMBDA_TASK_ROOT}/inference/
+
 CMD ["inference.handler.handler"]

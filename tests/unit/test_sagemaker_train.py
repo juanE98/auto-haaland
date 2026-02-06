@@ -15,12 +15,16 @@ from sagemaker.train_local import (
     DEFAULT_HYPERPARAMS,
     FEATURE_COLS,
     TARGET_COL,
+    _has_temporal_columns,
+    _temporal_train_test_split,
     evaluate_model,
     get_feature_importance,
     load_model,
     load_training_data,
     save_model,
     train_model,
+    train_model_temporal,
+    tune_hyperparameters,
     validate_features,
 )
 
@@ -360,3 +364,174 @@ class TestDefaultHyperparameters:
     def test_default_learning_rate(self):
         """Verify default learning_rate."""
         assert DEFAULT_HYPERPARAMS["learning_rate"] == 0.1
+
+
+class TestTemporalHelpers:
+    """Tests for temporal split helper functions."""
+
+    def test_has_temporal_columns_true(self, training_dataframe_10):
+        """Verify detection of gameweek and season columns."""
+        assert _has_temporal_columns(training_dataframe_10)
+
+    def test_has_temporal_columns_false_no_gameweek(self, training_dataframe_10):
+        """Verify detection fails when gameweek is missing."""
+        df = training_dataframe_10.drop(columns=["gameweek"])
+        assert not _has_temporal_columns(df)
+
+    def test_has_temporal_columns_false_no_season(self, training_dataframe_10):
+        """Verify detection fails when season is missing."""
+        df = training_dataframe_10.drop(columns=["season"])
+        assert not _has_temporal_columns(df)
+
+    def test_temporal_split_preserves_all_rows(self, training_dataframe_100):
+        """Verify temporal split preserves all data rows."""
+        train_df, test_df = _temporal_train_test_split(
+            training_dataframe_100, test_fraction=0.2
+        )
+        assert len(train_df) + len(test_df) == len(training_dataframe_100)
+
+    def test_temporal_split_respects_fraction(self, training_dataframe_100):
+        """Verify temporal split produces roughly correct sizes."""
+        train_df, test_df = _temporal_train_test_split(
+            training_dataframe_100, test_fraction=0.2
+        )
+        assert len(train_df) == 80
+        assert len(test_df) == 20
+
+    def test_temporal_split_chronological_order(self, training_dataframe_100):
+        """Verify train set precedes test set chronologically."""
+        train_df, test_df = _temporal_train_test_split(
+            training_dataframe_100, test_fraction=0.2
+        )
+        # Build sort keys for comparison
+        train_max = (
+            train_df["season"].astype(str)
+            + "_"
+            + train_df["gameweek"].astype(str).str.zfill(2)
+        ).max()
+        test_min = (
+            test_df["season"].astype(str)
+            + "_"
+            + test_df["gameweek"].astype(str).str.zfill(2)
+        ).min()
+        assert train_max <= test_min
+
+
+class TestTrainModelTemporal:
+    """Tests for train_model_temporal function."""
+
+    def test_returns_model_with_temporal_data(self, training_dataframe_100):
+        """Verify temporal training returns a valid model."""
+        model, X_test, y_test, split_info = train_model_temporal(training_dataframe_100)
+
+        assert isinstance(model, xgb.XGBRegressor)
+        assert hasattr(model, "predict")
+        assert split_info["split_type"] == "temporal"
+
+    def test_returns_test_data(self, training_dataframe_100):
+        """Verify temporal training returns test data."""
+        model, X_test, y_test, split_info = train_model_temporal(
+            training_dataframe_100, test_fraction=0.2
+        )
+
+        assert len(X_test) == 20
+        assert len(y_test) == 20
+
+    def test_split_info_contains_metadata(self, training_dataframe_100):
+        """Verify split_info contains expected metadata."""
+        _, _, _, split_info = train_model_temporal(training_dataframe_100)
+
+        assert "split_type" in split_info
+        assert "test_fraction" in split_info
+        assert "train_samples" in split_info
+        assert "test_samples" in split_info
+        assert "train_seasons" in split_info
+        assert "test_seasons" in split_info
+
+    def test_falls_back_to_random_without_temporal_columns(self, training_dataframe_10):
+        """Verify fallback to random split when columns are missing."""
+        df = training_dataframe_10.drop(columns=["gameweek", "season"])
+        model, X_test, y_test, split_info = train_model_temporal(df)
+
+        assert isinstance(model, xgb.XGBRegressor)
+        assert split_info["split_type"] == "random"
+
+    def test_custom_hyperparameters(self, training_dataframe_100):
+        """Verify custom hyperparameters are applied."""
+        hyperparams = {"n_estimators": 50, "max_depth": 3}
+        model, _, _, _ = train_model_temporal(
+            training_dataframe_100, hyperparams=hyperparams
+        )
+
+        assert model.n_estimators == 50
+        assert model.max_depth == 3
+
+    def test_predictions_are_numeric(self, training_dataframe_100):
+        """Verify temporally-trained model produces numeric predictions."""
+        import numpy as np
+
+        model, X_test, _, _ = train_model_temporal(training_dataframe_100)
+        predictions = model.predict(X_test)
+
+        assert len(predictions) == len(X_test)
+        assert all(np.issubdtype(type(p), np.number) for p in predictions)
+
+
+class TestTuneHyperparameters:
+    """Tests for tune_hyperparameters function."""
+
+    def test_returns_dict_with_expected_keys(self, training_dataframe_100):
+        """Verify tuning returns a dict with required hyperparameter keys."""
+        best_params = tune_hyperparameters(
+            training_dataframe_100, n_trials=3, temporal=True
+        )
+
+        assert isinstance(best_params, dict)
+        assert "n_estimators" in best_params
+        assert "max_depth" in best_params
+        assert "learning_rate" in best_params
+        assert "objective" in best_params
+        assert best_params["objective"] == "reg:squarederror"
+
+    def test_returns_valid_hyperparameter_ranges(self, training_dataframe_100):
+        """Verify tuned values are within expected search space."""
+        best_params = tune_hyperparameters(
+            training_dataframe_100, n_trials=3, temporal=True
+        )
+
+        assert 100 <= best_params["n_estimators"] <= 500
+        assert 3 <= best_params["max_depth"] <= 8
+        assert 0.01 <= best_params["learning_rate"] <= 0.3
+        assert 0.6 <= best_params["subsample"] <= 1.0
+        assert 0.5 <= best_params["colsample_bytree"] <= 1.0
+
+    def test_tuned_params_can_train_model(self, training_dataframe_100):
+        """Verify tuned parameters can be used to train a model."""
+        best_params = tune_hyperparameters(
+            training_dataframe_100, n_trials=3, temporal=True
+        )
+
+        model, X_test, y_test, _ = train_model_temporal(
+            training_dataframe_100, hyperparams=best_params
+        )
+        assert isinstance(model, xgb.XGBRegressor)
+        assert len(model.predict(X_test)) == len(X_test)
+
+    def test_works_with_random_split(self, training_dataframe_100):
+        """Verify tuning works with random split."""
+        best_params = tune_hyperparameters(
+            training_dataframe_100, n_trials=3, temporal=False
+        )
+
+        assert isinstance(best_params, dict)
+        assert "n_estimators" in best_params
+
+    def test_falls_back_to_random_without_temporal_columns(
+        self, training_dataframe_100
+    ):
+        """Verify tuning falls back to random split when columns missing."""
+        df = training_dataframe_100.drop(columns=["gameweek", "season"])
+        best_params = tune_hyperparameters(df, n_trials=3, temporal=True)
+
+        assert isinstance(best_params, dict)
+        assert "n_estimators" in best_params
