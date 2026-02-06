@@ -5,10 +5,7 @@
     "FetchData": {
       "Type": "Task",
       "Resource": "${DataFetcherFunctionArn}",
-      "Parameters": {
-        "gameweek.$": "$.gameweek",
-        "fetch_player_details": true
-      },
+      "Comment": "No Parameters block — Lambda receives raw input and auto-detects gameweek if not provided. Supports both EventBridge (no gameweek) and manual invocations (gameweek included).",
       "ResultPath": "$.fetchResult",
       "Retry": [
         {
