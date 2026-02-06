@@ -14,6 +14,7 @@ import argparse
 import json
 import logging
 import os
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -336,6 +337,12 @@ def load_training_data(data_dir: str) -> pd.DataFrame:
     dfs = []
     for f in parquet_files:
         df = pd.read_parquet(f)
+        # Infer season from directory path if not present in data
+        if "season" not in df.columns:
+            season_match = re.search(r"season_(\d{4}_\d{2})", str(f))
+            if season_match:
+                raw = season_match.group(1)
+                df["season"] = raw.replace("_", "-")
         logger.info(f"  Loaded {len(df)} rows from {f.name}")
         dfs.append(df)
 

@@ -14,6 +14,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Optional
@@ -105,7 +106,17 @@ def load_training_data(
             raise FileNotFoundError(f"No training parquet files found in {data_dir}")
 
         logger.info(f"Loading {len(parquet_files)} parquet files from {data_dir}")
-        dfs = [pd.read_parquet(f) for f in parquet_files]
+        dfs = []
+        for f in parquet_files:
+            df = pd.read_parquet(f)
+            # Infer season from directory path if not present in data
+            # e.g. data/historical/season_2023_24/gw20_features_training.parquet
+            if "season" not in df.columns:
+                season_match = re.search(r"season_(\d{4}_\d{2})", str(f))
+                if season_match:
+                    raw = season_match.group(1)  # e.g. "2023_24"
+                    df["season"] = raw.replace("_", "-")  # "2023-24"
+            dfs.append(df)
         return pd.concat(dfs, ignore_index=True)
 
     raise ValueError("Either data_path or data_dir must be provided")
