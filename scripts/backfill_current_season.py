@@ -38,7 +38,10 @@ from lambdas.common.feature_categories.opponent_features import (  # noqa: E402
 from lambdas.common.feature_categories.position_features import (  # noqa: E402
     POSITION_FEATURES,
 )
-from lambdas.common.feature_categories.team_features import TEAM_FEATURES  # noqa: E402
+from lambdas.common.feature_categories.team_features import (  # noqa: E402
+    TEAM_FEATURES,
+    _count_games_at_current_team,
+)
 from lambdas.common.feature_config import (  # noqa: E402
     FEATURE_COLS,
     compute_bootstrap_features,
@@ -321,6 +324,13 @@ def engineer_backfill_features(
         # Team and opponent features (default values for backfill)
         # Full computation would require team fixtures data not passed here
         team_feats = {feat: 0.0 for feat in TEAM_FEATURES}
+
+        # Compute games_at_current_team from player history and fixtures
+        fixtures_by_id = {f.get("id"): f for f in fixtures if f.get("id")}
+        team_feats["games_at_current_team"] = float(
+            _count_games_at_current_team(prior_history, team_id, fixtures_by_id)
+        )
+
         opponent_feats = {feat: 0.0 for feat in OPPONENT_FEATURES}
 
         # Fixture, position, and interaction features (default values)

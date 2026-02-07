@@ -414,10 +414,10 @@ class TestEngineerFeatures:
         # 8.5 * 4 = 34.0
         assert salah["form_x_difficulty"] == pytest.approx(34.0, rel=0.01)
 
-    def test_engineer_features_produces_all_200_features(
+    def test_engineer_features_produces_all_207_features(
         self, sample_bootstrap, sample_fixtures, sample_histories
     ):
-        """Test that engineer_features produces all 200 ML features.
+        """Test that engineer_features produces all 207 ML features.
 
         This is a regression test to ensure the feature processor
         computes all feature categories and doesn't regress to fewer features.
@@ -436,26 +436,26 @@ class TestEngineerFeatures:
             gameweek=20,
         )
 
-        # Verify all 200 features are present
+        # Verify all 207 features are present
         missing_features = set(FEATURE_COLS) - set(df.columns)
         assert (
             len(missing_features) == 0
         ), f"Missing {len(missing_features)} features: {sorted(missing_features)}"
 
-        # Verify exact count (200 features + metadata columns)
+        # Verify exact count (207 features + metadata columns)
         metadata_cols = ["player_id", "player_name", "team_id", "gameweek"]
         target_cols = ["actual_points"]
         feature_cols_in_df = [
             c for c in df.columns if c not in metadata_cols + target_cols
         ]
         assert (
-            len(feature_cols_in_df) == 200
-        ), f"Expected 200 features, got {len(feature_cols_in_df)}"
+            len(feature_cols_in_df) == 207
+        ), f"Expected 207 features, got {len(feature_cols_in_df)}"
 
     def test_engineer_features_no_history_produces_all_features(
         self, sample_bootstrap, sample_fixtures
     ):
-        """Test that all 200 features are produced even without player history.
+        """Test that all 207 features are produced even without player history.
 
         Ensures the fallback paths also compute all feature categories.
         """

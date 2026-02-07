@@ -341,6 +341,8 @@ def engineer_features(
             team_players=team_players,
             team_fixtures=team_fixtures,
             opponent_data=opponent_data,
+            player_history=history,
+            all_fixtures=fixtures,
         )
 
         opponent_features = compute_opponent_features(
@@ -378,7 +380,7 @@ def engineer_features(
         row.update(rolling)  # 73 features
         row.update(static)  # 9 features
         row.update(bootstrap_features)  # 32 features
-        row.update(team_features)  # 28 features
+        row.update(team_features)  # 35 features
         row.update(opponent_features)  # 24 features
         row.update(fixture_features)  # 16 features
         row.update(position_features)  # 8 features

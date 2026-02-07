@@ -36,12 +36,12 @@ SM_MODEL_DIR = os.environ.get("SM_MODEL_DIR", "/opt/ml/model")
 SM_OUTPUT_DATA_DIR = os.environ.get("SM_OUTPUT_DATA_DIR", "/opt/ml/output/data")
 
 # Feature version - must match lambdas/common/feature_config.py FEATURE_VERSION
-FEATURE_VERSION = "2.3.0"
+FEATURE_VERSION = "2.4.0"
 
 # Feature columns (must match feature processor output)
 # Keep in sync with lambdas/common/feature_config.py
-# Total: 73 rolling + 9 static + 32 bootstrap + 28 team + 24 opponent
-#        + 16 fixture + 8 position + 5 interaction + 5 derived = 200
+# Total: 73 rolling + 9 static + 32 bootstrap + 35 team + 24 opponent
+#        + 16 fixture + 8 position + 5 interaction + 5 derived = 207
 FEATURE_COLS = [
     # Rolling features (73 total)
     # Core stats with standard windows (1, 3, 5)
@@ -172,7 +172,7 @@ FEATURE_COLS = [
     "goals_per_90_season",
     "assists_per_90_season",
     "ict_per_90_season",
-    # Team context features (28 total) - Phase 3
+    # Team context features (35 total) - Phase 3 + Phase 5
     # Team form (10)
     "team_goals_scored_last_3",
     "team_goals_scored_last_5",
@@ -198,13 +198,20 @@ FEATURE_COLS = [
     "team_points",
     "team_goal_difference",
     "team_position_change_last_5",
-    # Player context (6)
+    # Player context (13)
     "team_total_points_avg",
     "player_share_of_team_points",
     "player_share_of_team_goals",
     "team_avg_ict",
     "team_players_available",
     "squad_depth_at_position",
+    "player_rank_in_team_points",
+    "player_rank_in_team_ict",
+    "player_share_of_team_assists",
+    "player_share_of_team_xgi",
+    "player_minutes_share",
+    "player_points_vs_position_avg",
+    "games_at_current_team",
     # Opponent analysis features (24 total) - Phase 3
     # Defensive vulnerability (12)
     "opp_goals_conceded_last_3",
@@ -291,6 +298,8 @@ def parse_args():
     parser.add_argument("--n-estimators", type=int, default=100)
     parser.add_argument("--max-depth", type=int, default=6)
     parser.add_argument("--learning-rate", type=float, default=0.1)
+    parser.add_argument("--subsample", type=float, default=0.8)
+    parser.add_argument("--colsample-bytree", type=float, default=0.7)
     parser.add_argument("--test-size", type=float, default=0.2)
     parser.add_argument("--random-state", type=int, default=42)
 
@@ -394,7 +403,8 @@ def train(args):
     logger.info("Starting SageMaker training job")
     logger.info(
         f"Hyperparameters: n_estimators={args.n_estimators}, "
-        f"max_depth={args.max_depth}, learning_rate={args.learning_rate}"
+        f"max_depth={args.max_depth}, learning_rate={args.learning_rate}, "
+        f"subsample={args.subsample}, colsample_bytree={args.colsample_bytree}"
     )
 
     use_temporal = not args.random_split
@@ -446,6 +456,8 @@ def train(args):
         n_estimators=args.n_estimators,
         max_depth=args.max_depth,
         learning_rate=args.learning_rate,
+        subsample=args.subsample,
+        colsample_bytree=args.colsample_bytree,
         random_state=args.random_state,
     )
 

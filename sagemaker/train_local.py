@@ -54,6 +54,8 @@ DEFAULT_HYPERPARAMS = {
     "n_estimators": 100,
     "max_depth": 6,
     "learning_rate": 0.1,
+    "subsample": 0.8,
+    "colsample_bytree": 0.7,
     "random_state": 42,
 }
 
@@ -63,6 +65,8 @@ HAUL_CLASSIFIER_HYPERPARAMS = {
     "n_estimators": 100,
     "max_depth": 5,
     "learning_rate": 0.1,
+    "subsample": 0.8,
+    "colsample_bytree": 0.7,
     "random_state": 42,
     "scale_pos_weight": 5,  # Handle class imbalance (hauls are rare)
 }

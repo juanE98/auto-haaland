@@ -37,9 +37,9 @@ from lambdas.common.feature_config import (
 
 @pytest.mark.unit
 class TestFeatureList:
-    def test_feature_cols_has_200_entries(self):
-        """FEATURE_COLS should contain exactly 200 features (Phase 4)."""
-        assert len(FEATURE_COLS) == 200
+    def test_feature_cols_has_207_entries(self):
+        """FEATURE_COLS should contain exactly 207 features."""
+        assert len(FEATURE_COLS) == 207
 
     def test_no_duplicate_feature_names(self):
         """All feature names should be unique."""
@@ -58,8 +58,8 @@ class TestFeatureList:
         assert len(BOOTSTRAP_FEATURES) == 32
 
     def test_team_features_count(self):
-        """Team features should have 28 entries (Phase 3)."""
-        assert len(TEAM_FEATURES) == 28
+        """Team features should have 35 entries."""
+        assert len(TEAM_FEATURES) == 35
 
     def test_opponent_features_count(self):
         """Opponent features should have 24 entries (Phase 3)."""

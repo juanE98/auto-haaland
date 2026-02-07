@@ -33,8 +33,8 @@ class TestFeatureColumns:
     """Tests for feature column definitions."""
 
     def test_feature_cols_count(self):
-        """Verify correct number of feature columns (200 after Phase 4)."""
-        assert len(FEATURE_COLS) == 200
+        """Verify correct number of feature columns (207 features)."""
+        assert len(FEATURE_COLS) == 207
 
     def test_feature_cols_key_names(self):
         """Verify key feature column names are present."""
@@ -364,6 +364,14 @@ class TestDefaultHyperparameters:
     def test_default_learning_rate(self):
         """Verify default learning_rate."""
         assert DEFAULT_HYPERPARAMS["learning_rate"] == 0.1
+
+    def test_default_subsample(self):
+        """Verify default subsample for regularisation."""
+        assert DEFAULT_HYPERPARAMS["subsample"] == 0.8
+
+    def test_default_colsample_bytree(self):
+        """Verify default colsample_bytree for regularisation."""
+        assert DEFAULT_HYPERPARAMS["colsample_bytree"] == 0.7
 
 
 class TestTemporalHelpers:

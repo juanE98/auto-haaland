@@ -387,6 +387,14 @@ def generate_training_dataframe(n_samples: int = 10):
             data[col] = np.random.randint(15, 25, n_samples).astype(float)
         elif col == "squad_depth_at_position":
             data[col] = np.random.randint(2, 6, n_samples).astype(float)
+        elif col.startswith("player_rank_in_team"):
+            data[col] = np.random.randint(1, 15, n_samples).astype(float)
+        elif col == "player_minutes_share":
+            data[col] = np.random.uniform(0.3, 1.5, n_samples)
+        elif col == "player_points_vs_position_avg":
+            data[col] = np.random.uniform(-30, 30, n_samples)
+        elif col == "games_at_current_team":
+            data[col] = np.random.randint(1, 38, n_samples).astype(float)
         # Opponent features (Phase 3)
         elif col.startswith("opp_goals_"):
             data[col] = np.random.uniform(0, 3, n_samples)

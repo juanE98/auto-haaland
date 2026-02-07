@@ -19,7 +19,7 @@ from common.feature_categories.position_features import POSITION_FEATURES
 from common.feature_categories.team_features import TEAM_FEATURES
 
 # Feature version for tracking compatibility between components
-FEATURE_VERSION = "2.3.0"
+FEATURE_VERSION = "2.4.0"
 
 # Rolling stat definitions: each entry maps a stat name to the history field
 # it is derived from, plus which rolling windows to compute.
@@ -192,9 +192,9 @@ def _generate_rolling_names() -> list[str]:
 ROLLING_FEATURE_NAMES = _generate_rolling_names()
 
 # The canonical list of feature columns used for training and inference.
-# Total: 73 rolling + 9 static + 32 bootstrap + 28 team + 24 opponent
+# Total: 73 rolling + 9 static + 32 bootstrap + 35 team + 24 opponent
 #        + 16 fixture + 8 position + 5 interaction + 5 derived
-#      = 200 features (Phase 4)
+#      = 207 features
 FEATURE_COLS = (
     ROLLING_FEATURE_NAMES
     + STATIC_FEATURES

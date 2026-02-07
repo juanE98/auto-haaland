@@ -2,12 +2,12 @@
 Team Context Features Module
 
 Computes features related to the player's team performance, strength, and context.
-Total: 28 features
+Total: 35 features
 """
 
 from typing import Any
 
-# Team context features (28 total)
+# Team context features (35 total)
 TEAM_FEATURES = [
     # Team form (10)
     "team_goals_scored_last_3",
@@ -34,13 +34,20 @@ TEAM_FEATURES = [
     "team_points",
     "team_goal_difference",
     "team_position_change_last_5",
-    # Player context within team (6)
+    # Player context within team (13)
     "team_total_points_avg",  # Average points of all team players
     "player_share_of_team_points",  # Player points / team total
     "player_share_of_team_goals",  # Player goals / team goals
     "team_avg_ict",  # Average ICT of team
     "team_players_available",  # Count of available players
     "squad_depth_at_position",  # Players at same position
+    "player_rank_in_team_points",  # Rank (1=best) by total_points within team
+    "player_rank_in_team_ict",  # Rank (1=best) by ict_index within team
+    "player_share_of_team_assists",  # Player assists / team total assists
+    "player_share_of_team_xgi",  # Player xGI / team total xGI
+    "player_minutes_share",  # Player minutes / team avg minutes
+    "player_points_vs_position_avg",  # Player points - avg(same position teammates)
+    "games_at_current_team",  # Consecutive recent games at current team
 ]
 
 
@@ -50,6 +57,8 @@ def compute_team_features(
     team_players: list[dict[str, Any]] | None = None,
     team_fixtures: list[dict[str, Any]] | None = None,
     opponent_data: dict[str, Any] | None = None,
+    player_history: list[dict[str, Any]] | None = None,
+    all_fixtures: list[dict[str, Any]] | None = None,
 ) -> dict[str, float]:
     """
     Compute team context features for a player.
@@ -60,6 +69,8 @@ def compute_team_features(
         team_players: List of all players in the same team
         team_fixtures: Recent fixtures for the team
         opponent_data: Opponent team data for differential calculations
+        player_history: Player's gameweek history entries (for transfer detection)
+        all_fixtures: All fixtures in the season (for cross-referencing history)
 
     Returns:
         Dict mapping team feature name to its value
@@ -222,6 +233,75 @@ def compute_team_features(
             1 for p in team_players if p.get("element_type") == player_position
         )
         result["squad_depth_at_position"] = float(same_position)
+
+        # --- Player-relative features (7) ---
+        # Rank by total_points within team (1 = best)
+        sorted_by_pts = sorted(
+            team_players, key=lambda p: p.get("total_points", 0), reverse=True
+        )
+        player_id = player.get("id")
+        pts_rank = next(
+            (i + 1 for i, p in enumerate(sorted_by_pts) if p.get("id") == player_id),
+            len(team_players),
+        )
+        result["player_rank_in_team_points"] = float(pts_rank)
+
+        # Rank by ict_index within team (1 = best)
+        sorted_by_ict = sorted(
+            team_players,
+            key=lambda p: float(p.get("ict_index", 0) or 0),
+            reverse=True,
+        )
+        ict_rank = next(
+            (i + 1 for i, p in enumerate(sorted_by_ict) if p.get("id") == player_id),
+            len(team_players),
+        )
+        result["player_rank_in_team_ict"] = float(ict_rank)
+
+        # Share of team assists
+        total_team_assists = sum(p.get("assists", 0) for p in team_players)
+        player_assists = player.get("assists", 0)
+        result["player_share_of_team_assists"] = (
+            round(player_assists / total_team_assists, 4)
+            if total_team_assists > 0
+            else 0.0
+        )
+
+        # Share of team expected goal involvements (xGI)
+        total_team_xgi = sum(
+            float(p.get("expected_goal_involvements", 0) or 0) for p in team_players
+        )
+        player_xgi = float(player.get("expected_goal_involvements", 0) or 0)
+        result["player_share_of_team_xgi"] = (
+            round(player_xgi / total_team_xgi, 4) if total_team_xgi > 0 else 0.0
+        )
+
+        # Minutes share (player minutes / team avg minutes)
+        player_minutes = player.get("minutes", 0)
+        team_avg_minutes = sum(p.get("minutes", 0) for p in team_players) / len(
+            team_players
+        )
+        result["player_minutes_share"] = (
+            round(player_minutes / team_avg_minutes, 3) if team_avg_minutes > 0 else 0.0
+        )
+
+        # Points vs position average (player points - avg of same-position teammates)
+        same_pos_players = [
+            p for p in team_players if p.get("element_type") == player_position
+        ]
+        if len(same_pos_players) > 1:
+            # Exclude the player themselves for a fair comparison
+            others_pts = [
+                p.get("total_points", 0)
+                for p in same_pos_players
+                if p.get("id") != player_id
+            ]
+            avg_others = sum(others_pts) / len(others_pts) if others_pts else 0
+            result["player_points_vs_position_avg"] = round(
+                player_points - avg_others, 2
+            )
+        else:
+            result["player_points_vs_position_avg"] = 0.0
     else:
         result["team_total_points_avg"] = 0.0
         result["player_share_of_team_points"] = 0.0
@@ -229,6 +309,23 @@ def compute_team_features(
         result["team_avg_ict"] = 0.0
         result["team_players_available"] = 0.0
         result["squad_depth_at_position"] = 0.0
+        result["player_rank_in_team_points"] = 0.0
+        result["player_rank_in_team_ict"] = 0.0
+        result["player_share_of_team_assists"] = 0.0
+        result["player_share_of_team_xgi"] = 0.0
+        result["player_minutes_share"] = 0.0
+        result["player_points_vs_position_avg"] = 0.0
+
+    # Games at current team (transfer-awareness signal)
+    if player_history and all_fixtures:
+        fixtures_by_id = {f.get("id"): f for f in all_fixtures if f.get("id")}
+        result["games_at_current_team"] = float(
+            _count_games_at_current_team(
+                player_history, player.get("team", 0), fixtures_by_id
+            )
+        )
+    else:
+        result["games_at_current_team"] = 0.0
 
     return result
 
@@ -280,3 +377,33 @@ def _get_match_points(fixture: dict[str, Any], team_id: int | None) -> int:
     elif goals_for == goals_against:
         return 1
     return 0
+
+
+def _count_games_at_current_team(
+    player_history: list[dict[str, Any]],
+    current_team_id: int,
+    fixtures_by_id: dict[int, dict[str, Any]],
+) -> int:
+    """
+    Count consecutive recent games played at the current team.
+
+    Walks backwards through the player's history, counting entries where the
+    fixture involved the current team. Stops at the first entry that doesn't
+    match, indicating the player was at a different team.
+
+    Args:
+        player_history: Player's gameweek history entries (chronological order)
+        current_team_id: The player's current team ID
+        fixtures_by_id: Dict mapping fixture ID to fixture data
+
+    Returns:
+        Number of consecutive recent games at the current team
+    """
+    count = 0
+    for entry in reversed(player_history):
+        fixture = fixtures_by_id.get(entry.get("fixture", -1), {})
+        if current_team_id in (fixture.get("team_h"), fixture.get("team_a")):
+            count += 1
+        else:
+            break
+    return count
