@@ -41,7 +41,7 @@ HAUL_BLEND_WEIGHT = 1.5
 
 # Team diversification: penalise 4th+ player from the same team
 TEAM_DIVERSITY_MAX = 3
-TEAM_DIVERSITY_PENALTY = 0.7
+TEAM_DIVERSITY_PENALTY = 0.65
 
 # Cache models across warm Lambda invocations
 _cached_model = None
@@ -216,8 +216,10 @@ def apply_team_diversification(results_df: pd.DataFrame) -> pd.DataFrame:
         ascending=False, method="first"
     )
     mask = df["_team_rank"] > TEAM_DIVERSITY_MAX
+    # Progressive penalty: 0.65^1 for 4th, 0.65^2 for 5th, etc.
     df.loc[mask, "predicted_points"] = (
-        df.loc[mask, "predicted_points"] * TEAM_DIVERSITY_PENALTY
+        df.loc[mask, "predicted_points"]
+        * TEAM_DIVERSITY_PENALTY ** (df.loc[mask, "_team_rank"] - TEAM_DIVERSITY_MAX)
     ).round(2)
     df = df.drop(columns=["_team_rank"])
     return df

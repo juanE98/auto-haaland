@@ -362,7 +362,7 @@ class TestHandler:
 @pytest.mark.unit
 class TestTeamDiversification:
     def test_penalty_applied_beyond_cap(self):
-        """4th and 5th players from the same team should get 0.85x penalty."""
+        """4th player gets 0.65^1, 5th gets 0.65^2 (progressive penalty)."""
         df = pd.DataFrame(
             {
                 "player_id": [1, 2, 3, 4, 5],
@@ -376,12 +376,12 @@ class TestTeamDiversification:
         assert result.loc[0, "predicted_points"] == 5.0
         assert result.loc[1, "predicted_points"] == 4.0
         assert result.loc[2, "predicted_points"] == 3.0
-        # 4th and 5th get penalty
+        # 4th: 0.65^1, 5th: 0.65^2 (progressive)
         assert result.loc[3, "predicted_points"] == pytest.approx(
-            round(2.0 * TEAM_DIVERSITY_PENALTY, 2)
+            round(2.0 * TEAM_DIVERSITY_PENALTY**1, 2)
         )
         assert result.loc[4, "predicted_points"] == pytest.approx(
-            round(1.0 * TEAM_DIVERSITY_PENALTY, 2)
+            round(1.0 * TEAM_DIVERSITY_PENALTY**2, 2)
         )
 
     def test_no_penalty_for_small_teams(self):
@@ -398,7 +398,7 @@ class TestTeamDiversification:
         assert result["predicted_points"].tolist() == [5.0, 4.0, 3.0]
 
     def test_diversification_across_multiple_teams(self):
-        """Penalty is applied independently per team."""
+        """Progressive penalty is applied independently per team."""
         df = pd.DataFrame(
             {
                 "player_id": [1, 2, 3, 4, 5, 6, 7, 8],
@@ -408,13 +408,13 @@ class TestTeamDiversification:
         )
         result = apply_team_diversification(df)
 
-        # Team 10: 4th player penalised
+        # Team 10: 4th player gets 0.65^1
         assert result.loc[0, "predicted_points"] == 5.0
         assert result.loc[3, "predicted_points"] == pytest.approx(
-            round(2.0 * TEAM_DIVERSITY_PENALTY, 2)
+            round(2.0 * TEAM_DIVERSITY_PENALTY**1, 2)
         )
-        # Team 20: 4th player penalised
+        # Team 20: 4th player gets 0.65^1
         assert result.loc[4, "predicted_points"] == 6.0
         assert result.loc[7, "predicted_points"] == pytest.approx(
-            round(3.0 * TEAM_DIVERSITY_PENALTY, 2)
+            round(3.0 * TEAM_DIVERSITY_PENALTY**1, 2)
         )

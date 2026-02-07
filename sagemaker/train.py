@@ -36,7 +36,7 @@ SM_MODEL_DIR = os.environ.get("SM_MODEL_DIR", "/opt/ml/model")
 SM_OUTPUT_DATA_DIR = os.environ.get("SM_OUTPUT_DATA_DIR", "/opt/ml/output/data")
 
 # Feature version - must match lambdas/common/feature_config.py FEATURE_VERSION
-FEATURE_VERSION = "2.6.0"
+FEATURE_VERSION = "2.6.1"
 
 # Feature columns (must match feature processor output)
 # Keep in sync with lambdas/common/feature_config.py
