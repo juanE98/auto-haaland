@@ -16,6 +16,9 @@ from moto import mock_aws
 from lambdas.inference.handler import (
     FEATURE_COLS,
     POSITION_MAP,
+    TEAM_DIVERSITY_MAX,
+    TEAM_DIVERSITY_PENALTY,
+    apply_team_diversification,
     handler,
     load_features_from_s3,
     load_model_from_s3,
@@ -27,12 +30,16 @@ from lambdas.inference.handler import (
 
 @pytest.fixture
 def trained_model(tmp_path, training_dataframe_100):
-    """Create a simple trained XGBoost model for testing."""
+    """Create a simple trained XGBoost model for testing.
+
+    Trains on log1p(actual_points) so that expm1 in run_inference
+    produces correct values.
+    """
     from lambdas.common.feature_config import TARGET_COL
 
     np.random.seed(42)
     X = training_dataframe_100[FEATURE_COLS]
-    y = training_dataframe_100[TARGET_COL]
+    y = np.log1p(training_dataframe_100[TARGET_COL].clip(lower=0))
 
     model = xgb.XGBRegressor(
         n_estimators=10,
@@ -351,3 +358,67 @@ class TestHandler:
                     {"gameweek": 20, "season": "2024_25"},
                     None,
                 )
+
+
+# === Team Diversification ===
+
+
+@pytest.mark.unit
+class TestTeamDiversification:
+    def test_penalty_applied_beyond_cap(self):
+        """4th and 5th players from the same team should get 0.85x penalty."""
+        df = pd.DataFrame(
+            {
+                "player_id": [1, 2, 3, 4, 5],
+                "team_id": [10, 10, 10, 10, 10],
+                "predicted_points": [5.0, 4.0, 3.0, 2.0, 1.0],
+            }
+        )
+        result = apply_team_diversification(df)
+
+        # Top 3 keep full score
+        assert result.loc[0, "predicted_points"] == 5.0
+        assert result.loc[1, "predicted_points"] == 4.0
+        assert result.loc[2, "predicted_points"] == 3.0
+        # 4th and 5th get penalty
+        assert result.loc[3, "predicted_points"] == pytest.approx(
+            round(2.0 * TEAM_DIVERSITY_PENALTY, 2)
+        )
+        assert result.loc[4, "predicted_points"] == pytest.approx(
+            round(1.0 * TEAM_DIVERSITY_PENALTY, 2)
+        )
+
+    def test_no_penalty_for_small_teams(self):
+        """Teams with <= 3 players should keep full scores."""
+        df = pd.DataFrame(
+            {
+                "player_id": [1, 2, 3],
+                "team_id": [10, 10, 10],
+                "predicted_points": [5.0, 4.0, 3.0],
+            }
+        )
+        result = apply_team_diversification(df)
+
+        assert result["predicted_points"].tolist() == [5.0, 4.0, 3.0]
+
+    def test_diversification_across_multiple_teams(self):
+        """Penalty is applied independently per team."""
+        df = pd.DataFrame(
+            {
+                "player_id": [1, 2, 3, 4, 5, 6, 7, 8],
+                "team_id": [10, 10, 10, 10, 20, 20, 20, 20],
+                "predicted_points": [5.0, 4.0, 3.0, 2.0, 6.0, 5.0, 4.0, 3.0],
+            }
+        )
+        result = apply_team_diversification(df)
+
+        # Team 10: 4th player penalised
+        assert result.loc[0, "predicted_points"] == 5.0
+        assert result.loc[3, "predicted_points"] == pytest.approx(
+            round(2.0 * TEAM_DIVERSITY_PENALTY, 2)
+        )
+        # Team 20: 4th player penalised
+        assert result.loc[4, "predicted_points"] == 6.0
+        assert result.loc[7, "predicted_points"] == pytest.approx(
+            round(3.0 * TEAM_DIVERSITY_PENALTY, 2)
+        )

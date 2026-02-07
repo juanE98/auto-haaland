@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Optional
 
 import boto3
+import numpy as np
 import pandas as pd
 import xgboost as xgb
 from sklearn.metrics import (
@@ -55,7 +56,7 @@ DEFAULT_HYPERPARAMS = {
     "max_depth": 6,
     "learning_rate": 0.1,
     "subsample": 0.8,
-    "colsample_bytree": 0.7,
+    "colsample_bytree": 0.5,
     "random_state": 42,
 }
 
@@ -66,13 +67,23 @@ HAUL_CLASSIFIER_HYPERPARAMS = {
     "max_depth": 5,
     "learning_rate": 0.1,
     "subsample": 0.8,
-    "colsample_bytree": 0.7,
+    "colsample_bytree": 0.5,
     "random_state": 42,
     "scale_pos_weight": 5,  # Handle class imbalance (hauls are rare)
 }
 
 # Haul threshold (10+ points is considered a haul)
 HAUL_THRESHOLD = 10
+
+
+def transform_target(y: pd.Series) -> pd.Series:
+    """Apply log1p transform to target, clipping negatives to 0."""
+    return np.log1p(y.clip(lower=0))
+
+
+def inverse_transform_target(y: np.ndarray) -> np.ndarray:
+    """Reverse the log1p transform to get back to points scale."""
+    return np.expm1(y)
 
 
 def load_training_data(
@@ -170,7 +181,7 @@ def train_model(
         params.update(hyperparams)
 
     X = df[FEATURE_COLS]
-    y = df[TARGET_COL]
+    y = transform_target(df[TARGET_COL])
 
     logger.info(f"Training data shape: {X.shape}")
     logger.info(f"Target distribution: mean={y.mean():.2f}, std={y.std():.2f}")
@@ -273,9 +284,9 @@ def train_model_temporal(
     train_df, test_df = _temporal_train_test_split(df, test_fraction)
 
     X_train = train_df[FEATURE_COLS]
-    y_train = train_df[TARGET_COL]
+    y_train = transform_target(train_df[TARGET_COL])
     X_test = test_df[FEATURE_COLS]
-    y_test = test_df[TARGET_COL]
+    y_test = transform_target(test_df[TARGET_COL])
 
     # Log split details
     train_seasons = sorted(train_df["season"].unique())
@@ -350,9 +361,9 @@ def tune_hyperparameters(
     if use_temporal:
         train_df, test_df = _temporal_train_test_split(df, test_fraction)
         X_train = train_df[FEATURE_COLS]
-        y_train = train_df[TARGET_COL]
+        y_train = transform_target(train_df[TARGET_COL])
         X_test = test_df[FEATURE_COLS]
-        y_test = test_df[TARGET_COL]
+        y_test = transform_target(test_df[TARGET_COL])
         logger.info(
             f"Tuning with temporal split: {len(X_train)} train / "
             f"{len(X_test)} test samples"
@@ -364,7 +375,7 @@ def tune_hyperparameters(
                 "Falling back to random split for tuning."
             )
         X = df[FEATURE_COLS]
-        y = df[TARGET_COL]
+        y = transform_target(df[TARGET_COL])
         X_train, X_test, y_train, y_test = train_test_split(
             X, y, test_size=test_fraction, random_state=42
         )
@@ -381,7 +392,7 @@ def tune_hyperparameters(
             "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.3, log=True),
             "min_child_weight": trial.suggest_int("min_child_weight", 1, 10),
             "subsample": trial.suggest_float("subsample", 0.6, 1.0),
-            "colsample_bytree": trial.suggest_float("colsample_bytree", 0.5, 1.0),
+            "colsample_bytree": trial.suggest_float("colsample_bytree", 0.3, 1.0),
             "reg_alpha": trial.suggest_float("reg_alpha", 1e-8, 10.0, log=True),
             "reg_lambda": trial.suggest_float("reg_lambda", 1e-8, 10.0, log=True),
             "gamma": trial.suggest_float("gamma", 1e-8, 1.0, log=True),
@@ -396,8 +407,10 @@ def tune_hyperparameters(
             verbose=False,
         )
 
-        predictions = model.predict(X_test)
-        mae = mean_absolute_error(y_test, predictions)
+        raw_predictions = model.predict(X_test)
+        predictions = inverse_transform_target(raw_predictions)
+        actuals = inverse_transform_target(y_test.values)
+        mae = mean_absolute_error(actuals, predictions)
         return mae
 
     # Suppress Optuna's default logging to reduce noise
@@ -435,14 +448,18 @@ def evaluate_model(
     Returns:
         Dictionary with evaluation metrics.
     """
-    predictions = model.predict(X_test)
+    raw_predictions = model.predict(X_test)
+
+    # Inverse-transform from log space back to points scale for evaluation
+    predictions = inverse_transform_target(raw_predictions)
+    actuals = inverse_transform_target(y_test.values)
 
     metrics = {
-        "mae": mean_absolute_error(y_test, predictions),
-        "rmse": mean_squared_error(y_test, predictions, squared=False),
-        "r2": r2_score(y_test, predictions),
+        "mae": mean_absolute_error(actuals, predictions),
+        "rmse": mean_squared_error(actuals, predictions, squared=False),
+        "r2": r2_score(actuals, predictions),
         "mean_prediction": float(predictions.mean()),
-        "mean_actual": float(y_test.mean()),
+        "mean_actual": float(actuals.mean()),
     }
 
     logger.info("Model Evaluation Metrics:")

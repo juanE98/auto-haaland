@@ -17,6 +17,7 @@ import os
 import re
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import xgboost as xgb
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
@@ -36,7 +37,7 @@ SM_MODEL_DIR = os.environ.get("SM_MODEL_DIR", "/opt/ml/model")
 SM_OUTPUT_DATA_DIR = os.environ.get("SM_OUTPUT_DATA_DIR", "/opt/ml/output/data")
 
 # Feature version - must match lambdas/common/feature_config.py FEATURE_VERSION
-FEATURE_VERSION = "2.4.0"
+FEATURE_VERSION = "2.5.0"
 
 # Feature columns (must match feature processor output)
 # Keep in sync with lambdas/common/feature_config.py
@@ -290,6 +291,16 @@ FEATURE_COLS = [
 TARGET_COL = "actual_points"
 
 
+def transform_target(y: pd.Series) -> pd.Series:
+    """Apply log1p transform to target, clipping negatives to 0."""
+    return np.log1p(y.clip(lower=0))
+
+
+def inverse_transform_target(y: np.ndarray) -> np.ndarray:
+    """Reverse the log1p transform to get back to points scale."""
+    return np.expm1(y)
+
+
 def parse_args():
     """Parse hyperparameters passed by SageMaker."""
     parser = argparse.ArgumentParser()
@@ -299,7 +310,7 @@ def parse_args():
     parser.add_argument("--max-depth", type=int, default=6)
     parser.add_argument("--learning-rate", type=float, default=0.1)
     parser.add_argument("--subsample", type=float, default=0.8)
-    parser.add_argument("--colsample-bytree", type=float, default=0.7)
+    parser.add_argument("--colsample-bytree", type=float, default=0.5)
     parser.add_argument("--test-size", type=float, default=0.2)
     parser.add_argument("--random-state", type=int, default=42)
 
@@ -428,9 +439,9 @@ def train(args):
     if use_temporal and has_temporal:
         train_df, test_df = _temporal_train_test_split(df, args.test_size)
         X_train = train_df[FEATURE_COLS]
-        y_train = train_df[TARGET_COL]
+        y_train = transform_target(train_df[TARGET_COL])
         X_test = test_df[FEATURE_COLS]
-        y_test = test_df[TARGET_COL]
+        y_test = transform_target(test_df[TARGET_COL])
 
         train_gws = sorted(train_df["gameweek"].unique())
         test_gws = sorted(test_df["gameweek"].unique())
@@ -443,8 +454,9 @@ def train(args):
                 "Columns 'gameweek' and/or 'season' not found. "
                 "Falling back to random split."
             )
+        y_transformed = transform_target(y)
         X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=args.test_size, random_state=args.random_state
+            X, y_transformed, test_size=args.test_size, random_state=args.random_state
         )
         logger.info("Using random train/test split")
 
@@ -468,11 +480,13 @@ def train(args):
         verbose=True,
     )
 
-    # Evaluate
-    predictions = model.predict(X_test)
-    mae = mean_absolute_error(y_test, predictions)
-    rmse = mean_squared_error(y_test, predictions, squared=False)
-    r2 = r2_score(y_test, predictions)
+    # Evaluate (inverse-transform from log space back to points scale)
+    raw_predictions = model.predict(X_test)
+    predictions = inverse_transform_target(raw_predictions)
+    actuals = inverse_transform_target(y_test.values)
+    mae = mean_absolute_error(actuals, predictions)
+    rmse = mean_squared_error(actuals, predictions, squared=False)
+    r2 = r2_score(actuals, predictions)
 
     logger.info("Evaluation Metrics:")
     logger.info(f"  MAE:  {mae:.3f}")

@@ -19,11 +19,13 @@ from sagemaker.train_local import (
     _temporal_train_test_split,
     evaluate_model,
     get_feature_importance,
+    inverse_transform_target,
     load_model,
     load_training_data,
     save_model,
     train_model,
     train_model_temporal,
+    transform_target,
     tune_hyperparameters,
     validate_features,
 )
@@ -371,7 +373,7 @@ class TestDefaultHyperparameters:
 
     def test_default_colsample_bytree(self):
         """Verify default colsample_bytree for regularisation."""
-        assert DEFAULT_HYPERPARAMS["colsample_bytree"] == 0.7
+        assert DEFAULT_HYPERPARAMS["colsample_bytree"] == 0.5
 
 
 class TestTemporalHelpers:
@@ -535,7 +537,7 @@ class TestTuneHyperparameters:
         assert 3 <= best_params["max_depth"] <= 8
         assert 0.01 <= best_params["learning_rate"] <= 0.3
         assert 0.6 <= best_params["subsample"] <= 1.0
-        assert 0.5 <= best_params["colsample_bytree"] <= 1.0
+        assert 0.3 <= best_params["colsample_bytree"] <= 1.0
 
     def test_tuned_params_can_train_model(self, training_dataframe_100):
         """Verify tuned parameters can be used to train a model."""
@@ -567,3 +569,37 @@ class TestTuneHyperparameters:
 
         assert isinstance(best_params, dict)
         assert "n_estimators" in best_params
+
+
+class TestTargetTransform:
+    """Tests for log1p target transform and its inverse."""
+
+    def test_roundtrip_positive_values(self):
+        """Verify transform then inverse returns original values."""
+        import numpy as np
+
+        original = pd.Series([0, 1, 2, 5, 10, 14])
+        transformed = transform_target(original)
+        recovered = inverse_transform_target(transformed.values)
+        np.testing.assert_array_almost_equal(recovered, original.values, decimal=5)
+
+    def test_negative_values_clipped(self):
+        """Verify negative values are clipped to 0 before transform."""
+        import numpy as np
+
+        y = pd.Series([-2, -1, 0, 3])
+        transformed = transform_target(y)
+        # Negatives should be treated as 0, so log1p(0) = 0
+        assert transformed.iloc[0] == pytest.approx(0.0)
+        assert transformed.iloc[1] == pytest.approx(0.0)
+        assert transformed.iloc[2] == pytest.approx(0.0)
+        assert transformed.iloc[3] == pytest.approx(np.log1p(3))
+
+    def test_positive_values_transformed(self):
+        """Verify positive values are correctly log1p transformed."""
+        import numpy as np
+
+        y = pd.Series([1, 5, 10])
+        transformed = transform_target(y)
+        expected = np.log1p(np.array([1, 5, 10]))
+        np.testing.assert_array_almost_equal(transformed.values, expected, decimal=5)

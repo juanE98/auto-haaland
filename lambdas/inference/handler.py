@@ -11,6 +11,7 @@ import os
 from datetime import datetime, timezone
 from typing import Any
 
+import numpy as np
 import pandas as pd
 import xgboost as xgb
 from botocore.exceptions import ClientError
@@ -35,6 +36,13 @@ POSITION_MAP = {
     3: "MID",
     4: "FWD",
 }
+
+# Composite scoring: blend haul probability into predicted points
+HAUL_BLEND_WEIGHT = 0.1
+
+# Team diversification: penalise 4th+ player from the same team
+TEAM_DIVERSITY_MAX = 3
+TEAM_DIVERSITY_PENALTY = 0.85
 
 # Cache models across warm Lambda invocations
 _cached_model = None
@@ -190,6 +198,32 @@ def validate_features(df: pd.DataFrame) -> None:
         raise ValueError(f"Missing feature columns: {missing}")
 
 
+def apply_team_diversification(results_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Apply a penalty to players ranked 4th+ within the same team.
+
+    For each team, the top TEAM_DIVERSITY_MAX players by predicted_points
+    keep their full score. Players beyond that threshold receive a
+    TEAM_DIVERSITY_PENALTY multiplier.
+
+    Args:
+        results_df: Predictions DataFrame with team_id and predicted_points.
+
+    Returns:
+        DataFrame with diversification penalty applied.
+    """
+    df = results_df.copy()
+    df["_team_rank"] = df.groupby("team_id")["predicted_points"].rank(
+        ascending=False, method="first"
+    )
+    mask = df["_team_rank"] > TEAM_DIVERSITY_MAX
+    df.loc[mask, "predicted_points"] = (
+        df.loc[mask, "predicted_points"] * TEAM_DIVERSITY_PENALTY
+    ).round(2)
+    df = df.drop(columns=["_team_rank"])
+    return df
+
+
 def run_inference(
     model: xgb.XGBRegressor,
     features_df: pd.DataFrame,
@@ -213,7 +247,10 @@ def run_inference(
         season, chance_of_playing, haul_probability
     """
     X = features_df[FEATURE_COLS]
-    predictions = model.predict(X)
+    raw_predictions = model.predict(X)
+
+    # Inverse-transform from log space back to points scale
+    predictions = np.expm1(raw_predictions)
 
     # Get haul probabilities if model is available
     if haul_model is not None:
@@ -223,6 +260,9 @@ def run_inference(
             f"Haul probabilities - Mean: {haul_probabilities.mean():.1f}%, "
             f"Max: {haul_probabilities.max():.1f}%"
         )
+        # Composite scoring: blend haul probability into predicted points
+        # haul_probabilities are 0-100 percentage
+        predictions = predictions + haul_probabilities * (HAUL_BLEND_WEIGHT / 100.0)
     else:
         haul_probabilities = [0.0] * len(features_df)
         logger.info("No haul model available, setting haul_probability to 0")
@@ -248,6 +288,9 @@ def run_inference(
             "haul_probability": haul_probabilities,
         }
     )
+
+    # Apply team diversification penalty
+    results = apply_team_diversification(results)
 
     logger.info(
         f"Generated {len(results)} predictions. "
