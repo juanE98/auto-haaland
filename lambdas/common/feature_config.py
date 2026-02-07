@@ -19,7 +19,7 @@ from common.feature_categories.position_features import POSITION_FEATURES
 from common.feature_categories.team_features import TEAM_FEATURES
 
 # Feature version for tracking compatibility between components
-FEATURE_VERSION = "2.5.0"
+FEATURE_VERSION = "2.6.0"
 
 # Rolling stat definitions: each entry maps a stat name to the history field
 # it is derived from, plus which rolling windows to compute.

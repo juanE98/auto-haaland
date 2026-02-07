@@ -11,7 +11,6 @@ import os
 from datetime import datetime, timezone
 from typing import Any
 
-import numpy as np
 import pandas as pd
 import xgboost as xgb
 from botocore.exceptions import ClientError
@@ -38,11 +37,11 @@ POSITION_MAP = {
 }
 
 # Composite scoring: blend haul probability into predicted points
-HAUL_BLEND_WEIGHT = 0.1
+HAUL_BLEND_WEIGHT = 1.5
 
 # Team diversification: penalise 4th+ player from the same team
 TEAM_DIVERSITY_MAX = 3
-TEAM_DIVERSITY_PENALTY = 0.85
+TEAM_DIVERSITY_PENALTY = 0.7
 
 # Cache models across warm Lambda invocations
 _cached_model = None
@@ -247,10 +246,7 @@ def run_inference(
         season, chance_of_playing, haul_probability
     """
     X = features_df[FEATURE_COLS]
-    raw_predictions = model.predict(X)
-
-    # Inverse-transform from log space back to points scale
-    predictions = np.expm1(raw_predictions)
+    predictions = model.predict(X)
 
     # Get haul probabilities if model is available
     if haul_model is not None:

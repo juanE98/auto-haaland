@@ -30,16 +30,12 @@ from lambdas.inference.handler import (
 
 @pytest.fixture
 def trained_model(tmp_path, training_dataframe_100):
-    """Create a simple trained XGBoost model for testing.
-
-    Trains on log1p(actual_points) so that expm1 in run_inference
-    produces correct values.
-    """
+    """Create a simple trained XGBoost model for testing."""
     from lambdas.common.feature_config import TARGET_COL
 
     np.random.seed(42)
     X = training_dataframe_100[FEATURE_COLS]
-    y = np.log1p(training_dataframe_100[TARGET_COL].clip(lower=0))
+    y = training_dataframe_100[TARGET_COL]
 
     model = xgb.XGBRegressor(
         n_estimators=10,
