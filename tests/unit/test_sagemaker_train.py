@@ -395,8 +395,29 @@ class TestTemporalHelpers:
         train_df, test_df = _temporal_train_test_split(
             training_dataframe_100, test_fraction=0.2
         )
-        assert len(train_df) == 80
-        assert len(test_df) == 20
+        # Gameweek-boundary split won't be exact 80/20 by row count,
+        # but should be approximately correct
+        total = len(train_df) + len(test_df)
+        assert total == len(training_dataframe_100)
+        test_ratio = len(test_df) / total
+        assert 0.10 <= test_ratio <= 0.35
+
+    def test_temporal_split_no_gameweek_in_both_sets(self, training_dataframe_100):
+        """Verify no gameweek appears in both train and test sets."""
+        train_df, test_df = _temporal_train_test_split(
+            training_dataframe_100, test_fraction=0.2
+        )
+        train_keys = set(
+            train_df["season"].astype(str)
+            + "_"
+            + train_df["gameweek"].astype(str).str.zfill(2)
+        )
+        test_keys = set(
+            test_df["season"].astype(str)
+            + "_"
+            + test_df["gameweek"].astype(str).str.zfill(2)
+        )
+        assert train_keys.isdisjoint(test_keys)
 
     def test_temporal_split_chronological_order(self, training_dataframe_100):
         """Verify train set precedes test set chronologically."""
@@ -434,8 +455,11 @@ class TestTrainModelTemporal:
             training_dataframe_100, test_fraction=0.2
         )
 
-        assert len(X_test) == 20
-        assert len(y_test) == 20
+        # Gameweek-boundary split produces approximate sizes
+        assert len(X_test) > 0
+        assert len(X_test) == len(y_test)
+        total = split_info["train_samples"] + split_info["test_samples"]
+        assert total == len(training_dataframe_100)
 
     def test_split_info_contains_metadata(self, training_dataframe_100):
         """Verify split_info contains expected metadata."""

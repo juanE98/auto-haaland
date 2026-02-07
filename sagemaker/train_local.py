@@ -67,8 +67,8 @@ HAUL_CLASSIFIER_HYPERPARAMS = {
     "scale_pos_weight": 5,  # Handle class imbalance (hauls are rare)
 }
 
-# Haul threshold (8+ points is considered a haul)
-HAUL_THRESHOLD = 8
+# Haul threshold (10+ points is considered a haul)
+HAUL_THRESHOLD = 10
 
 
 def load_training_data(
@@ -218,9 +218,13 @@ def _temporal_train_test_split(
     )
     df = df.sort_values("_sort_key").reset_index(drop=True)
 
-    split_idx = int(len(df) * (1 - test_fraction))
-    train_df = df.iloc[:split_idx].drop(columns=["_sort_key"])
-    test_df = df.iloc[split_idx:].drop(columns=["_sort_key"])
+    # Split on gameweek boundaries to avoid leaking same-gameweek data
+    unique_keys = df["_sort_key"].unique()
+    n_test_keys = max(1, int(len(unique_keys) * test_fraction))
+    test_keys = set(unique_keys[-n_test_keys:])
+
+    train_df = df[~df["_sort_key"].isin(test_keys)].drop(columns=["_sort_key"])
+    test_df = df[df["_sort_key"].isin(test_keys)].drop(columns=["_sort_key"])
 
     return train_df, test_df
 
@@ -515,15 +519,20 @@ def train_haul_classifier(
     hyperparams: Optional[dict] = None,
     test_size: float = 0.2,
     haul_threshold: int = HAUL_THRESHOLD,
+    temporal: bool = True,
 ) -> tuple[xgb.XGBClassifier, pd.DataFrame, pd.Series]:
     """
-    Train an XGBoost classifier to predict haul probability (8+ points).
+    Train an XGBoost classifier to predict haul probability (10+ points).
+
+    Uses temporal train/test split when gameweek/season columns are available
+    and temporal=True, otherwise falls back to random split.
 
     Args:
         df: DataFrame with features and target.
         hyperparams: XGBoost hyperparameters (uses defaults if None).
         test_size: Fraction of data to use for testing.
-        haul_threshold: Points threshold for a "haul" (default: 8).
+        haul_threshold: Points threshold for a "haul" (default: 10).
+        temporal: Use temporal split if True and columns are available.
 
     Returns:
         Tuple of (trained classifier, test features DataFrame, test target Series).
@@ -534,18 +543,37 @@ def train_haul_classifier(
     if hyperparams:
         params.update(hyperparams)
 
-    X = df[FEATURE_COLS]
-    y = (df[TARGET_COL] >= haul_threshold).astype(int)
+    use_temporal = temporal and _has_temporal_columns(df)
 
-    haul_rate = y.mean() * 100
+    # Create binary haul target
+    haul_target = (df[TARGET_COL] >= haul_threshold).astype(int)
+
+    haul_rate = haul_target.mean() * 100
     logger.info(f"Haul rate (>={haul_threshold} pts): {haul_rate:.2f}%")
-    logger.info(f"Training data shape: {X.shape}")
+    logger.info(f"Training data shape: {df[FEATURE_COLS].shape}")
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=test_size, random_state=params.get("random_state", 42)
-    )
+    if use_temporal:
+        train_df, test_df = _temporal_train_test_split(df, test_size)
+        X_train = train_df[FEATURE_COLS]
+        y_train = (train_df[TARGET_COL] >= haul_threshold).astype(int)
+        X_test = test_df[FEATURE_COLS]
+        y_test = (test_df[TARGET_COL] >= haul_threshold).astype(int)
+        logger.info(
+            f"Temporal split: {len(X_train)} train / {len(X_test)} test samples"
+        )
+    else:
+        if temporal:
+            logger.warning(
+                "Columns 'gameweek' and/or 'season' not found. "
+                "Falling back to random split for haul classifier."
+            )
+        X = df[FEATURE_COLS]
+        y = haul_target
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=test_size, random_state=params.get("random_state", 42)
+        )
+        logger.info(f"Random split: {len(X_train)} train / {len(X_test)} test samples")
 
-    logger.info(f"Train set: {len(X_train)} samples, Test set: {len(X_test)} samples")
     logger.info(
         f"Train haul rate: {y_train.mean() * 100:.2f}%, "
         f"Test haul rate: {y_test.mean() * 100:.2f}%"
@@ -700,8 +728,8 @@ def main():
     parser.add_argument(
         "--haul-threshold",
         type=int,
-        default=8,
-        help="Points threshold for haul classification (default: 8)",
+        default=10,
+        help="Points threshold for haul classification (default: 10)",
     )
 
     # Split strategy
@@ -814,7 +842,10 @@ def main():
         logger.info("=" * 50)
 
         haul_model, X_test_haul, y_test_haul = train_haul_classifier(
-            df, test_size=args.test_size, haul_threshold=args.haul_threshold
+            df,
+            test_size=args.test_size,
+            haul_threshold=args.haul_threshold,
+            temporal=use_temporal,
         )
 
         haul_metrics = evaluate_haul_classifier(haul_model, X_test_haul, y_test_haul)
