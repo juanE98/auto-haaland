@@ -78,21 +78,18 @@ def get_latest_gameweek():
 
     table = get_table()
 
-    # Scan with projection to only get gameweek values (minimises read cost)
-    response = table.scan(
-        ProjectionExpression="gameweek",
-        Limit=1000,
-    )
+    # Query the GSI from gameweek 38 down to 1; return the first with predictions.
+    for gw in range(38, 0, -1):
+        response = table.query(
+            IndexName="gameweek-points-index",
+            KeyConditionExpression=Key("gameweek").eq(gw),
+            Limit=1,
+            ProjectionExpression="gameweek",
+        )
+        if response.get("Items"):
+            return {"gameweek": gw}
 
-    items = response.get("Items", [])
-    if not items:
-        raise NotFoundError("No predictions found")
-
-    # Find max gameweek from results
-    gameweeks = {int(item["gameweek"]) for item in items}
-    latest = max(gameweeks)
-
-    return {"gameweek": latest}
+    raise NotFoundError("No predictions found")
 
 
 @app.get("/predictions")

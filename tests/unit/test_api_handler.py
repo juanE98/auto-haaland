@@ -447,6 +447,57 @@ class TestComparePlayersEndpoint:
         assert 999 in body["missing"]
 
 
+class TestGetLatestGameweek:
+    """Tests for GET /gameweek/latest endpoint."""
+
+    @patch("lambdas.api_handler.handler.get_table")
+    def test_returns_latest_gameweek(self, mock_get_table, mock_context):
+        """Test returns the highest gameweek with predictions."""
+        mock_table = MagicMock()
+        # Queries from GW38 downward; GW38-23 empty, GW22 has predictions
+        responses = [{"Items": []}] * 16 + [{"Items": [{"gameweek": 22}]}]
+        mock_table.query.side_effect = responses
+        mock_get_table.return_value = mock_table
+
+        event = make_api_event(path="/gameweek/latest")
+
+        response = handler(event, mock_context)
+
+        assert response["statusCode"] == 200
+        body = json.loads(response["body"])
+        assert body["gameweek"] == 22
+
+    @patch("lambdas.api_handler.handler.get_table")
+    def test_no_predictions_returns_404(self, mock_get_table, mock_context):
+        """Test empty table returns 404."""
+        mock_table = MagicMock()
+        mock_table.query.return_value = {"Items": []}
+        mock_get_table.return_value = mock_table
+
+        event = make_api_event(path="/gameweek/latest")
+
+        response = handler(event, mock_context)
+
+        assert response["statusCode"] == 404
+
+    @patch("lambdas.api_handler.handler.get_table")
+    def test_handles_single_gameweek(self, mock_get_table, mock_context):
+        """Test works with only one gameweek available."""
+        mock_table = MagicMock()
+        # GW38-16 empty, GW15 has predictions
+        responses = [{"Items": []}] * 23 + [{"Items": [{"gameweek": 15}]}]
+        mock_table.query.side_effect = responses
+        mock_get_table.return_value = mock_table
+
+        event = make_api_event(path="/gameweek/latest")
+
+        response = handler(event, mock_context)
+
+        assert response["statusCode"] == 200
+        body = json.loads(response["body"])
+        assert body["gameweek"] == 15
+
+
 class TestCORSHeaders:
     """Tests for CORS headers."""
 
