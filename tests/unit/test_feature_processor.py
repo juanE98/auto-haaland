@@ -17,6 +17,7 @@ from lambdas.feature_processor.handler import (
     get_opponent_info,
     get_team_strength,
     handler,
+    load_player_histories_from_s3,
 )
 
 
@@ -578,3 +579,93 @@ class TestFeatureProcessorHandler:
         assert result["statusCode"] == 404
         assert "error" in result
         assert "not found" in result["error"].lower()
+
+
+class TestLoadPlayerHistoriesFromS3:
+    """Tests for load_player_histories_from_s3 with combined file support."""
+
+    def test_load_combined_histories_file(self):
+        """Test loading the combined player histories JSON file."""
+        mock_s3 = Mock()
+        combined_data = {
+            "350": {"history": [{"round": 1, "total_points": 8}]},
+            "328": {"history": [{"round": 1, "total_points": 12}]},
+        }
+        mock_s3.get_object.return_value = {
+            "Body": Mock(
+                read=Mock(return_value=json.dumps(combined_data).encode("utf-8"))
+            )
+        }
+
+        result = load_player_histories_from_s3(mock_s3, "test-bucket", 20, "2024_25")
+
+        # Keys should be converted to int
+        assert 350 in result
+        assert 328 in result
+        assert result[350] == [{"round": 1, "total_points": 8}]
+        assert result[328] == [{"round": 1, "total_points": 12}]
+
+        # Should have tried the combined file
+        mock_s3.get_object.assert_called_once_with(
+            Bucket="test-bucket",
+            Key="raw/season_2024_25/gw20_player_histories.json",
+        )
+
+    def test_fallback_to_individual_files(self):
+        """Test fallback to individual player files when combined file missing."""
+        from botocore.exceptions import ClientError
+
+        mock_s3 = Mock()
+
+        # First call (combined file) raises NoSuchKey
+        # Second call (list_objects_v2) returns individual files
+        # Third+ calls (get_object for individual files) return player data
+        def get_object_side_effect(**kwargs):
+            key = kwargs["Key"]
+            if key.endswith("_player_histories.json"):
+                raise ClientError(
+                    {"Error": {"Code": "NoSuchKey", "Message": "Not found"}},
+                    "GetObject",
+                )
+            elif "player_350" in key:
+                return {
+                    "Body": Mock(
+                        read=Mock(
+                            return_value=json.dumps({"history": [{"round": 1}]}).encode(
+                                "utf-8"
+                            )
+                        )
+                    )
+                }
+            return {"Body": Mock(read=Mock(return_value=b'{"history": []}'))}
+
+        mock_s3.get_object.side_effect = get_object_side_effect
+        mock_s3.list_objects_v2.return_value = {
+            "Contents": [{"Key": "raw/season_2024_25/gw20_players/player_350.json"}]
+        }
+
+        result = load_player_histories_from_s3(mock_s3, "test-bucket", 20, "2024_25")
+
+        assert 350 in result
+        assert result[350] == [{"round": 1}]
+
+    def test_string_to_int_key_conversion(self):
+        """Test that JSON string keys are converted to int player IDs."""
+        mock_s3 = Mock()
+        combined_data = {
+            "1": {"history": []},
+            "999": {"history": [{"round": 5}]},
+        }
+        mock_s3.get_object.return_value = {
+            "Body": Mock(
+                read=Mock(return_value=json.dumps(combined_data).encode("utf-8"))
+            )
+        }
+
+        result = load_player_histories_from_s3(mock_s3, "test-bucket", 10, "2024_25")
+
+        # All keys should be int, not str
+        for key in result:
+            assert isinstance(key, int), f"Expected int key, got {type(key)}"
+        assert 1 in result
+        assert 999 in result

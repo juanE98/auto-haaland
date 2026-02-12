@@ -8,6 +8,7 @@ This is the first step in the data pipeline.
 import json
 import logging
 import os
+import time
 from datetime import datetime, timezone
 from typing import Any, Dict
 
@@ -22,6 +23,10 @@ logger.setLevel(logging.INFO)
 # Environment variables
 BUCKET_NAME = os.getenv("BUCKET_NAME", "fpl-ml-data")
 AWS_ENDPOINT_URL = os.getenv("AWS_ENDPOINT_URL")  # For LocalStack
+
+# Batching constants for player history fetches
+PLAYER_BATCH_SIZE = 50
+PLAYER_BATCH_DELAY = 1.0  # Seconds between batches
 
 
 def save_to_s3(s3_client, bucket: str, key: str, data: Dict[str, Any]) -> None:
@@ -69,7 +74,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
     # Parse input
     gameweek = event.get("gameweek")
-    fetch_player_details = event.get("fetch_player_details", False)
+    fetch_player_details = event.get("fetch_player_details", True)
 
     # Initialise clients
     s3_client = get_s3_client(endpoint_url=AWS_ENDPOINT_URL)
@@ -115,30 +120,43 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
                 logger.info(f"Processing {player_count} players...")
 
-                # Limit to avoid timeouts (Lambda has 15 min max)
-                # TODO: Batch this or use separate invocations in production
-                max_players = min(player_count, 50)  # Start with 50 for testing
+                # Fetch all players in batches with rate limiting
+                all_histories = {}
+                for batch_start in range(0, player_count, PLAYER_BATCH_SIZE):
+                    batch_end = min(batch_start + PLAYER_BATCH_SIZE, player_count)
+                    batch = players[batch_start:batch_end]
+                    batch_num = batch_start // PLAYER_BATCH_SIZE + 1
+                    total_batches = (
+                        player_count + PLAYER_BATCH_SIZE - 1
+                    ) // PLAYER_BATCH_SIZE
 
-                for i, player in enumerate(players[:max_players]):
-                    player_id = player["id"]
+                    logger.info(
+                        f"Fetching batch {batch_num}/{total_batches} "
+                        f"(players {batch_start + 1}-{batch_end})"
+                    )
 
-                    if i % 10 == 0:
-                        logger.info(f"Processing player {i + 1}/{max_players}")
+                    for player in batch:
+                        player_id = player["id"]
+                        try:
+                            player_summary = fpl.get_player_summary(player_id)
+                            all_histories[str(player_id)] = player_summary
+                        except FPLApiError as e:
+                            logger.warning(f"Failed to fetch player {player_id}: {e}")
+                            continue
 
-                    try:
-                        player_summary = fpl.get_player_summary(player_id)
+                    # Rate limit between batches (skip delay after last batch)
+                    if batch_end < player_count:
+                        time.sleep(PLAYER_BATCH_DELAY)
 
-                        player_key = (
-                            f"raw/season_{season}/gw{gameweek}_players/"
-                            f"player_{player_id}.json"
-                        )
-                        save_to_s3(s3_client, BUCKET_NAME, player_key, player_summary)
-                        files_saved.append(player_key)
-
-                    except FPLApiError as e:
-                        logger.warning(f"Failed to fetch player {player_id}: {e}")
-                        # Continue with next player
-                        continue
+                # Save combined histories as a single file
+                histories_key = (
+                    f"raw/season_{season}/gw{gameweek}_player_histories.json"
+                )
+                save_to_s3(s3_client, BUCKET_NAME, histories_key, all_histories)
+                files_saved.append(histories_key)
+                logger.info(
+                    f"Saved combined histories for " f"{len(all_histories)} players"
+                )
 
             # === Success response ===
             return {
@@ -166,7 +184,7 @@ if __name__ == "__main__":
     # Test event
     test_event = {
         "gameweek": 20,
-        "fetch_player_details": False,  # Set to True to fetch player details
+        "fetch_player_details": True,
     }
 
     # Set LocalStack endpoint for local testing

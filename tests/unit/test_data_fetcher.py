@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, Mock, call, patch
 
 import pytest
 
-from lambdas.data_fetcher.handler import handler, save_to_s3
+from lambdas.data_fetcher.handler import PLAYER_BATCH_SIZE, handler, save_to_s3
 
 
 class TestDataFetcherHandler:
@@ -66,13 +66,16 @@ class TestDataFetcherHandler:
         mock_fpl = MagicMock()
         mock_fpl.get_season_string.return_value = "2024_25"
         mock_fpl.get_current_gameweek.return_value = 22  # Auto-detected
-        mock_fpl.get_bootstrap_static.return_value = {"events": []}
+        mock_fpl.get_bootstrap_static.return_value = {
+            "events": [],
+            "elements": [],
+        }
         mock_fpl.get_fixtures.return_value = []
         mock_fpl.__enter__.return_value = mock_fpl
         mock_fpl.__exit__.return_value = None
         mock_fpl_class.return_value = mock_fpl
 
-        # Test event (no gameweek specified)
+        # Test event (no gameweek specified — defaults fetch histories)
         event = {}
 
         # Invoke handler
@@ -82,11 +85,13 @@ class TestDataFetcherHandler:
         assert result["statusCode"] == 200
         assert result["gameweek"] == 22
         mock_fpl.get_current_gameweek.assert_called_once()
+        # bootstrap + fixtures + combined histories (empty)
+        assert result["files_count"] == 3
 
     @patch("lambdas.data_fetcher.handler.get_s3_client")
     @patch("lambdas.data_fetcher.handler.FPLApiClient")
     def test_handler_with_player_details(self, mock_fpl_class, mock_get_s3):
-        """Test handler fetches individual player details when requested."""
+        """Test handler saves combined histories file when fetching players."""
         # Mock S3 client
         mock_s3 = Mock()
         mock_get_s3.return_value = mock_s3
@@ -115,13 +120,22 @@ class TestDataFetcherHandler:
 
         # Assertions
         assert result["statusCode"] == 200
-        # bootstrap + fixtures + 2 players
-        assert result["files_count"] == 4
+        # bootstrap + fixtures + 1 combined histories file
+        assert result["files_count"] == 3
 
         # Verify player summaries were fetched
         assert mock_fpl.get_player_summary.call_count == 2
         mock_fpl.get_player_summary.assert_any_call(350)
         mock_fpl.get_player_summary.assert_any_call(328)
+
+        # Verify combined file was saved (3rd put_object call)
+        histories_call = mock_s3.put_object.call_args_list[2]
+        assert (
+            histories_call[1]["Key"] == "raw/season_2024_25/gw20_player_histories.json"
+        )
+        saved_data = json.loads(histories_call[1]["Body"])
+        assert "350" in saved_data
+        assert "328" in saved_data
 
     @patch("lambdas.data_fetcher.handler.get_s3_client")
     @patch("lambdas.data_fetcher.handler.FPLApiClient")
@@ -176,6 +190,101 @@ class TestDataFetcherHandler:
         # Assertions
         assert result["statusCode"] == 400
         assert "Could not determine current gameweek" in result["error"]
+
+    @patch("lambdas.data_fetcher.handler.get_s3_client")
+    @patch("lambdas.data_fetcher.handler.FPLApiClient")
+    def test_handler_default_fetches_player_histories(
+        self, mock_fpl_class, mock_get_s3
+    ):
+        """Test handler fetches player histories by default (no event override)."""
+        mock_s3 = Mock()
+        mock_get_s3.return_value = mock_s3
+
+        mock_fpl = MagicMock()
+        mock_fpl.get_season_string.return_value = "2024_25"
+        mock_fpl.get_bootstrap_static.return_value = {
+            "events": [],
+            "elements": [{"id": 1, "web_name": "Player1"}],
+        }
+        mock_fpl.get_fixtures.return_value = []
+        mock_fpl.get_player_summary.return_value = {"history": [{"round": 1}]}
+        mock_fpl.__enter__.return_value = mock_fpl
+        mock_fpl.__exit__.return_value = None
+        mock_fpl_class.return_value = mock_fpl
+
+        # No fetch_player_details in event — should default to True
+        event = {"gameweek": 20}
+        result = handler(event, None)
+
+        assert result["statusCode"] == 200
+        # bootstrap + fixtures + combined histories
+        assert result["files_count"] == 3
+        mock_fpl.get_player_summary.assert_called_once_with(1)
+
+    @patch("lambdas.data_fetcher.handler.get_s3_client")
+    @patch("lambdas.data_fetcher.handler.FPLApiClient")
+    def test_handler_skip_player_details_when_false(self, mock_fpl_class, mock_get_s3):
+        """Test handler skips player histories when fetch_player_details=False."""
+        mock_s3 = Mock()
+        mock_get_s3.return_value = mock_s3
+
+        mock_fpl = MagicMock()
+        mock_fpl.get_season_string.return_value = "2024_25"
+        mock_fpl.get_bootstrap_static.return_value = {
+            "events": [],
+            "elements": [{"id": 1, "web_name": "Player1"}],
+        }
+        mock_fpl.get_fixtures.return_value = []
+        mock_fpl.__enter__.return_value = mock_fpl
+        mock_fpl.__exit__.return_value = None
+        mock_fpl_class.return_value = mock_fpl
+
+        event = {"gameweek": 20, "fetch_player_details": False}
+        result = handler(event, None)
+
+        assert result["statusCode"] == 200
+        # bootstrap + fixtures only
+        assert result["files_count"] == 2
+        mock_fpl.get_player_summary.assert_not_called()
+
+    @patch("lambdas.data_fetcher.handler.time.sleep")
+    @patch("lambdas.data_fetcher.handler.get_s3_client")
+    @patch("lambdas.data_fetcher.handler.FPLApiClient")
+    def test_handler_batching_with_many_players(
+        self, mock_fpl_class, mock_get_s3, mock_sleep
+    ):
+        """Test handler fetches all players without cap, using batched delays."""
+        mock_s3 = Mock()
+        mock_get_s3.return_value = mock_s3
+
+        # Create 120 players (more than PLAYER_BATCH_SIZE of 50)
+        players = [{"id": i, "web_name": f"Player{i}"} for i in range(1, 121)]
+
+        mock_fpl = MagicMock()
+        mock_fpl.get_season_string.return_value = "2024_25"
+        mock_fpl.get_bootstrap_static.return_value = {
+            "events": [],
+            "elements": players,
+        }
+        mock_fpl.get_fixtures.return_value = []
+        mock_fpl.get_player_summary.return_value = {"history": []}
+        mock_fpl.__enter__.return_value = mock_fpl
+        mock_fpl.__exit__.return_value = None
+        mock_fpl_class.return_value = mock_fpl
+
+        event = {"gameweek": 20, "fetch_player_details": True}
+        result = handler(event, None)
+
+        assert result["statusCode"] == 200
+        # All 120 players fetched (no cap)
+        assert mock_fpl.get_player_summary.call_count == 120
+        # 3 batches: 50 + 50 + 20 → 2 delays between batches
+        assert mock_sleep.call_count == 2
+
+        # Verify combined file contains all 120 players
+        histories_call = mock_s3.put_object.call_args_list[2]
+        saved_data = json.loads(histories_call[1]["Body"])
+        assert len(saved_data) == 120
 
 
 class TestSaveToS3:

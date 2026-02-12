@@ -5,7 +5,7 @@
     "FetchData": {
       "Type": "Task",
       "Resource": "${DataFetcherFunctionArn}",
-      "Comment": "No Parameters block — Lambda receives raw input and auto-detects gameweek if not provided. Supports both EventBridge (no gameweek) and manual invocations (gameweek included).",
+      "Comment": "No Parameters block — Lambda receives raw input and auto-detects gameweek if not provided. Fetches player histories by default for rolling feature computation. Supports both EventBridge (no gameweek) and manual invocations (gameweek included).",
       "ResultPath": "$.fetchResult",
       "Retry": [
         {

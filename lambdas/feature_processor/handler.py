@@ -67,9 +67,35 @@ def load_player_histories_from_s3(
     """
     Load player history data from S3.
 
+    Tries the combined histories file first (gw{N}_player_histories.json),
+    then falls back to individual player files (gw{N}_players/player_{id}.json)
+    for backwards compatibility.
+
     Returns a dict mapping player_id -> list of gameweek history entries.
     Returns empty dict if player histories don't exist.
     """
+    # Try combined histories file first
+    combined_key = f"raw/season_{season}/gw{gameweek}_player_histories.json"
+    try:
+        data = load_json_from_s3(s3_client, bucket, combined_key)
+        histories = {}
+        for player_id_str, player_data in data.items():
+            player_id = int(player_id_str)
+            histories[player_id] = player_data.get("history", [])
+        logger.info(f"Loaded combined histories for {len(histories)} players")
+        return histories
+    except ClientError as e:
+        error_code = e.response.get("Error", {}).get("Code", "")
+        if error_code in ("NoSuchKey", "404"):
+            logger.info(
+                "Combined histories file not found, " "falling back to individual files"
+            )
+        else:
+            logger.warning(f"Error loading combined histories: {e}")
+    except Exception as e:
+        logger.warning(f"Error loading combined histories: {e}")
+
+    # Fall back to individual player files
     prefix = f"raw/season_{season}/gw{gameweek}_players/"
     histories = {}
 
