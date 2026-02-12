@@ -165,22 +165,21 @@ class TestDataFetcherS3Integration:
 
             result = handler(event, None)
 
-        # Verify player files were saved
-        assert result["files_count"] == 4  # bootstrap + fixtures + 2 players
+        # Verify combined histories file was saved
+        assert result["files_count"] == 3  # bootstrap + fixtures + combined histories
 
-        # Check Salah's data
-        salah_response = s3_client.get_object(
-            Bucket=bucket, Key="raw/season_2024_25/gw20_players/player_350.json"
+        # Check combined histories file
+        histories_response = s3_client.get_object(
+            Bucket=bucket,
+            Key="raw/season_2024_25/gw20_player_histories.json",
         )
-        salah_data = json.loads(salah_response["Body"].read())
-        assert salah_data["history"][0]["total_points"] == 12
+        histories_data = json.loads(histories_response["Body"].read())
 
-        # Check Haaland's data
-        haaland_response = s3_client.get_object(
-            Bucket=bucket, Key="raw/season_2024_25/gw20_players/player_328.json"
-        )
-        haaland_data = json.loads(haaland_response["Body"].read())
-        assert haaland_data["history"][0]["total_points"] == 15
+        # Verify both players present (keys are string in JSON)
+        assert "350" in histories_data
+        assert "328" in histories_data
+        assert histories_data["350"]["history"][0]["total_points"] == 12
+        assert histories_data["328"]["history"][0]["total_points"] == 15
 
     def test_s3_list_objects(self, localstack_s3_client, clean_s3_bucket):
         """Test listing saved objects in S3."""
