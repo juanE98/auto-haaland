@@ -169,19 +169,28 @@ class FPLApiClient:
 
     def get_current_gameweek(self) -> Optional[int]:
         """
-        Get the current active gameweek number.
+        Get the upcoming gameweek number for predictions.
+
+        Returns the next unfinished gameweek, since the pipeline runs
+        before the deadline to produce predictions for team selection.
+        Falls back to the current gameweek if no next gameweek exists
+        (e.g. final gameweek of the season).
 
         Returns:
-            Current gameweek number, or None if season not started
+            Upcoming gameweek number, or None if season not started
         """
         bootstrap = self.get_bootstrap_static()
         events = bootstrap.get("events", [])
 
+        next_gw = None
+        current_gw = None
         for event in events:
+            if event.get("is_next"):
+                next_gw = event["id"]
             if event.get("is_current"):
-                return event["id"]
+                current_gw = event["id"]
 
-        return None
+        return next_gw or current_gw
 
     def is_gameweek_finished(self, gameweek: int) -> bool:
         """

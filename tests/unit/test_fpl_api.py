@@ -155,15 +155,15 @@ class TestFPLApiClient:
         )
 
     @patch("lambdas.common.fpl_api.httpx.Client")
-    def test_get_current_gameweek(self, mock_client_class):
-        """Test getting current gameweek."""
+    def test_get_current_gameweek_returns_next(self, mock_client_class):
+        """Test that get_current_gameweek returns the next gameweek for predictions."""
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.json.return_value = {
             "events": [
-                {"id": 19, "is_current": False},
-                {"id": 20, "is_current": True},
-                {"id": 21, "is_current": False},
+                {"id": 19, "is_current": False, "is_next": False},
+                {"id": 20, "is_current": True, "is_next": False},
+                {"id": 21, "is_current": False, "is_next": True},
             ]
         }
 
@@ -171,12 +171,33 @@ class TestFPLApiClient:
         mock_client.get.return_value = mock_response
         mock_client_class.return_value = mock_client
 
-        # Test
+        # Test - should return next GW (21), not current (20)
         client = FPLApiClient()
         current_gw = client.get_current_gameweek()
 
-        # Assertions
-        assert current_gw == 20
+        assert current_gw == 21
+
+    @patch("lambdas.common.fpl_api.httpx.Client")
+    def test_get_current_gameweek_falls_back_to_current(self, mock_client_class):
+        """Test fallback to current gameweek when no next exists (final GW)."""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "events": [
+                {"id": 37, "is_current": False, "is_next": False},
+                {"id": 38, "is_current": True, "is_next": False},
+            ]
+        }
+
+        mock_client = Mock()
+        mock_client.get.return_value = mock_response
+        mock_client_class.return_value = mock_client
+
+        # Test - no next GW, should fall back to current (38)
+        client = FPLApiClient()
+        current_gw = client.get_current_gameweek()
+
+        assert current_gw == 38
 
     @patch("lambdas.common.fpl_api.httpx.Client")
     def test_is_gameweek_finished(self, mock_client_class):
