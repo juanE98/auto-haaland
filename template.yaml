@@ -224,7 +224,7 @@ Resources:
           Type: Schedule
           Properties:
             Description: Run FPL prediction pipeline weekly
-            Schedule: "cron(0 20 ? * FRI *)"
+            Schedule: "cron(0 8 ? * WED *)"
             Enabled: true
 
   # SNS Alerts
