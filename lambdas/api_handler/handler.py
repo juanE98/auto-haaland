@@ -40,6 +40,26 @@ TABLE_NAME = os.getenv("TABLE_NAME", "fpl-predictions")
 AWS_ENDPOINT_URL = os.getenv("AWS_ENDPOINT_URL")
 VALID_POSITIONS = ["GKP", "DEF", "MID", "FWD"]
 
+# Upper bound for the `limit` query param. Comfortably covers a full gameweek
+# (~700 players) while preventing unbounded reads from a hostile/oversized value.
+MAX_LIMIT = 1000
+
+
+def parse_limit(default: int) -> int:
+    """Parse the `limit` query param into a bounded, positive integer.
+
+    Returns a value in the range [1, MAX_LIMIT]. Raises BadRequestError (400)
+    on non-integer input rather than letting int() surface as an opaque 500.
+    """
+    raw = app.current_event.get_query_string_value("limit", str(default))
+    try:
+        value = int(raw)
+    except ValueError:
+        raise BadRequestError("limit must be an integer")
+    if value < 1:
+        raise BadRequestError("limit must be a positive integer")
+    return min(value, MAX_LIMIT)
+
 
 def get_table():
     """Get DynamoDB table resource."""
@@ -110,7 +130,7 @@ def get_predictions():
     except ValueError:
         raise BadRequestError("gameweek must be an integer")
 
-    limit = int(app.current_event.get_query_string_value("limit", "100"))
+    limit = parse_limit(100)
 
     logger.info("Getting predictions", extra={"gameweek": gameweek, "limit": limit})
 
@@ -217,7 +237,7 @@ def get_top_predictions():
                 f"Invalid position. Must be one of: {VALID_POSITIONS}"
             )
 
-    limit = int(app.current_event.get_query_string_value("limit", "10"))
+    limit = parse_limit(10)
 
     # Haul remains available for older clients, but rank is the new upside score.
     sort_by = app.current_event.get_query_string_value("sort_by", "points")

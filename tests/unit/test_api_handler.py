@@ -8,7 +8,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from lambdas.api_handler.handler import VALID_POSITIONS, app, decimal_to_float, handler
+from lambdas.api_handler.handler import (
+    MAX_LIMIT,
+    VALID_POSITIONS,
+    app,
+    decimal_to_float,
+    handler,
+)
 
 
 class MockLambdaContext:
@@ -166,6 +172,36 @@ class TestGetPredictionsEndpoint:
 
         call_kwargs = mock_table.query.call_args[1]
         assert call_kwargs["Limit"] == 5
+
+    @patch("lambdas.api_handler.handler.get_table")
+    def test_non_integer_limit_returns_400(self, mock_get_table, mock_context):
+        """Non-integer limit is rejected with 400, not an opaque 500."""
+        event = make_api_event(
+            path="/predictions", query_params={"gameweek": "20", "limit": "abc"}
+        )
+
+        response = handler(event, mock_context)
+
+        assert response["statusCode"] == 400
+        body = json.loads(response["body"])
+        assert "limit" in body["message"]
+
+    @patch("lambdas.api_handler.handler.get_table")
+    def test_oversized_limit_is_capped(self, mock_get_table, mock_context):
+        """A hostile/oversized limit is bounded to MAX_LIMIT before querying."""
+        mock_table = MagicMock()
+        mock_table.query.return_value = {"Items": []}
+        mock_get_table.return_value = mock_table
+
+        event = make_api_event(
+            path="/predictions",
+            query_params={"gameweek": "20", "limit": "100000000"},
+        )
+
+        handler(event, mock_context)
+
+        call_kwargs = mock_table.query.call_args[1]
+        assert call_kwargs["Limit"] == MAX_LIMIT
 
 
 class TestGetPlayerPredictionEndpoint:

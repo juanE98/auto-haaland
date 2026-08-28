@@ -29,6 +29,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
 
+      - name: Audit dependencies
+        run: |
+          pip-audit -r requirements-dev.txt
+          for manifest in lambdas/requirements.txt lambdas/data_fetcher/requirements.txt lambdas/feature_processor/requirements.txt lambdas/inference/requirements.txt sagemaker/requirements.txt; do
+            pip-audit -r "$manifest"
+          done
+
       - name: Run unit tests
         run: |
           pytest tests/unit -v --cov=lambdas --cov=scripts --cov-report=term-missing --cov-report=xml

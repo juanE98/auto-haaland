@@ -9,7 +9,7 @@
 ![AWS DynamoDB](https://img.shields.io/badge/aws--dynamodb-%234053D6.svg?style=for-the-badge&logo=amazon-dynamodb&logoColor=white)
 ![AWS SageMaker](https://img.shields.io/badge/aws--sagemaker-%23FF9900.svg?style=for-the-badge&logo=amazon-aws&logoColor=white)
 ![XGBoost](https://img.shields.io/badge/xgboost-2.0.3-%23337AB7.svg?style=for-the-badge&logo=xgboost&logoColor=white)
-![pytest](https://img.shields.io/badge/pytest-8.0.0-%230A9EDC.svg?style=for-the-badge&logo=pytest&logoColor=white)
+![pytest](https://img.shields.io/badge/pytest-9.1.1-%230A9EDC.svg?style=for-the-badge&logo=pytest&logoColor=white)
 ![LocalStack](https://img.shields.io/badge/localstack-%234D4D4D.svg?style=for-the-badge&logo=localstack&logoColor=white)
 
 An automated Fantasy Premier League prediction system using XGBoost and AWS.
@@ -36,6 +36,7 @@ An automated Fantasy Premier League prediction system using XGBoost and AWS.
 
 # Or manual setup
 sudo apt install python3.12-venv docker-compose
+# Install the AWS SAM CLI separately and ensure `sam` is on PATH.
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements-dev.txt

@@ -30,6 +30,11 @@ Resources:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
               SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
 
   # DynamoDB Table with GSIs
   FPLPredictionsTable:
@@ -46,6 +51,8 @@ Resources:
           AttributeType: N
         - AttributeName: position
           AttributeType: S
+        - AttributeName: haul_probability
+          AttributeType: N
         - AttributeName: rank_score
           AttributeType: N
       KeySchema:
@@ -67,6 +74,14 @@ Resources:
             - AttributeName: position
               KeyType: HASH
             - AttributeName: predicted_points
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: gameweek-haul-index
+          KeySchema:
+            - AttributeName: gameweek
+              KeyType: HASH
+            - AttributeName: haul_probability
               KeyType: RANGE
           Projection:
             ProjectionType: ALL
