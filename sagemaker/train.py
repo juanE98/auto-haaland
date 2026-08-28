@@ -17,6 +17,7 @@ import os
 import re
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import xgboost as xgb
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
@@ -36,14 +37,12 @@ SM_MODEL_DIR = os.environ.get("SM_MODEL_DIR", "/opt/ml/model")
 SM_OUTPUT_DATA_DIR = os.environ.get("SM_OUTPUT_DATA_DIR", "/opt/ml/output/data")
 
 # Feature version - must match lambdas/common/feature_config.py FEATURE_VERSION
-FEATURE_VERSION = "2.6.1"
+FEATURE_VERSION = "3.2.0"
 
-# Feature columns (must match feature processor output)
-# Keep in sync with lambdas/common/feature_config.py
-# Total: 73 rolling + 9 static + 32 bootstrap + 35 team + 24 opponent
-#        + 16 fixture + 8 position + 5 interaction + 5 derived = 207
-FEATURE_COLS = [
-    # Rolling features (73 total)
+# Available feature columns. The container is isolated from Lambda modules, so
+# the final model contract below is repeated here and covered by a parity test.
+AVAILABLE_FEATURE_COLS = [
+    # Rolling features (82 total)
     # Core stats with standard windows (1, 3, 5)
     "points_last_1",
     "points_last_3",
@@ -89,6 +88,16 @@ FEATURE_COLS = [
     "starts_last_1",
     "starts_last_3",
     "starts_last_5",
+    # 2026/27 defensive contribution scoring
+    "defensive_contribution_last_1",
+    "defensive_contribution_last_3",
+    "defensive_contribution_last_5",
+    "clearances_blocks_interceptions_last_3",
+    "clearances_blocks_interceptions_last_5",
+    "tackles_last_3",
+    "tackles_last_5",
+    "recoveries_last_3",
+    "recoveries_last_5",
     # Stats with medium/long windows (3, 5)
     "yellow_cards_last_3",
     "yellow_cards_last_5",
@@ -133,10 +142,8 @@ FEATURE_COLS = [
     "opponent_defence_strength",
     "selected_by_percent",
     "now_cost",
-    # Bootstrap features (32 total) - Phase 2
-    # FPL Expected Points & Value (8)
-    "ep_this",
-    "ep_next",
+    # Bootstrap features (30 total) - Phase 2
+    # FPL Value (6)
     "points_per_game",
     "value_form",
     "value_season",
@@ -287,6 +294,23 @@ FEATURE_COLS = [
     "points_volatility",
 ]
 
+# Only these 94 signals can be reproduced by both the free historical data and
+# the live pipeline. The first 82 available columns are the rolling features.
+FEATURE_COLS = AVAILABLE_FEATURE_COLS[:82] + [
+    "form_score",
+    "opponent_strength",
+    "home_away",
+    "position",
+    "now_cost",
+    "is_double_gameweek",
+    "dgw_fixture_count",
+    "minutes_pct",
+    "form_x_difficulty",
+    "points_per_90",
+    "goal_contributions_last_3",
+    "points_volatility",
+]
+
 TARGET_COL = "actual_points"
 
 
@@ -370,6 +394,18 @@ def validate_data(df: pd.DataFrame) -> None:
     if TARGET_COL not in df.columns:
         raise ValueError(f"Missing target column: {TARGET_COL}")
 
+    missing_values = df[FEATURE_COLS].columns[df[FEATURE_COLS].isna().any()].tolist()
+    if missing_values:
+        raise ValueError(f"Missing feature values: {missing_values}")
+
+    key_columns = [
+        column for column in ("season", "gameweek", "player_id") if column in df.columns
+    ]
+    if {"gameweek", "player_id"}.issubset(key_columns) and df.duplicated(
+        key_columns
+    ).any():
+        raise ValueError(f"Duplicate player-week rows for key {key_columns}")
+
 
 def _temporal_train_test_split(
     df: pd.DataFrame,
@@ -452,8 +488,7 @@ def train(args):
 
     # Train model
     model = xgb.XGBRegressor(
-        objective="reg:quantileerror",
-        quantile_alpha=0.75,
+        objective="reg:squarederror",
         n_estimators=args.n_estimators,
         max_depth=args.max_depth,
         learning_rate=args.learning_rate,
@@ -493,6 +528,20 @@ def train(args):
     model_file = model_path / "model.xgb"
     model.save_model(str(model_file))
     logger.info(f"Model saved to {model_file}")
+
+    if len(predictions) >= 2 and np.ptp(predictions) > 0:
+        point_slope, point_intercept = np.polyfit(predictions, y_test, 1)
+    else:
+        point_slope, point_intercept = 1.0, 0.0
+    metadata = {
+        "point_slope": max(0.0, float(point_slope)),
+        "point_intercept": float(point_intercept),
+        "haul_slope": 1.0,
+        "haul_intercept": 0.0,
+        "rank_haul_weight": 1.5,
+    }
+    with open(model_path / "model_metadata.json", "w") as metadata_file:
+        json.dump(metadata, metadata_file, indent=2)
 
     # Save metrics for SageMaker
     metrics = {

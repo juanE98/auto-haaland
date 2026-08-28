@@ -62,6 +62,56 @@ GITHUB_RAW_BASE = (
 # Mapping from position string to numeric element_type
 POSITION_MAP = {"GK": 1, "DEF": 2, "MID": 3, "FWD": 4}
 
+MATCH_STATS = {
+    "total_points",
+    "minutes",
+    "goals_scored",
+    "assists",
+    "clean_sheets",
+    "bps",
+    "ict_index",
+    "threat",
+    "creativity",
+    "influence",
+    "bonus",
+    "yellow_cards",
+    "saves",
+    "expected_goals",
+    "expected_assists",
+    "starts",
+    "red_cards",
+    "own_goals",
+    "penalties_saved",
+    "penalties_missed",
+    "defensive_contribution",
+    "clearances_blocks_interceptions",
+    "tackles",
+    "recoveries",
+}
+
+
+def aggregate_gameweek_rows(gw_df: pd.DataFrame) -> pd.DataFrame:
+    """Collapse double-gameweek fixture rows into one player-week row."""
+    if gw_df.empty:
+        return gw_df.copy()
+
+    player_key = "element" if "element" in gw_df.columns else "name"
+    if not gw_df.duplicated(player_key).any():
+        result = gw_df.copy()
+        if "fixture_count" not in result.columns:
+            result["fixture_count"] = 1
+        return result
+
+    aggregations = {
+        column: ("sum" if column in MATCH_STATS else "last")
+        for column in gw_df.columns
+        if column != player_key
+    }
+    grouped = gw_df.groupby(player_key, as_index=False, sort=False).agg(aggregations)
+    fixture_counts = gw_df.groupby(player_key).size()
+    grouped["fixture_count"] = grouped[player_key].map(fixture_counts)
+    return grouped
+
 
 def convert_season_format(vaastav_season: str) -> str:
     """
@@ -229,6 +279,7 @@ def engineer_historical_features(
         DataFrame with engineered features and actual_points target
     """
     features = []
+    gw_df = aggregate_gameweek_rows(gw_df)
 
     for _, row in gw_df.iterrows():
         player_name = str(row.get("name", ""))
@@ -248,7 +299,9 @@ def engineer_historical_features(
 
         # Opponent strength from team strength map
         opponent_team = int(row.get("opponent_team", 0))
-        opponent_strength = team_strength_map.get(opponent_team, 3)
+        opponent_strength = int(
+            row.get("difficulty") or team_strength_map.get(opponent_team, 3)
+        )
 
         # Home/away
         was_home = row.get("was_home", False)
@@ -327,7 +380,9 @@ def engineer_historical_features(
         fixture_feats["fdr_current"] = 3.0  # Default medium difficulty
         fixture_feats["fdr_next_3_avg"] = 3.0
         fixture_feats["fdr_next_5_avg"] = 3.0
-        fixture_feats["dgw_fixture_count"] = 1.0  # Single fixture
+        fixture_count = int(row.get("fixture_count", 1) or 1)
+        fixture_feats["dgw_fixture_count"] = float(fixture_count)
+        fixture_feats["is_double_gameweek"] = 1.0 if fixture_count > 1 else 0.0
         fixture_feats["days_since_last_game"] = 7.0
         fixture_feats["kickoff_hour"] = 15.0  # Default 3pm
         fixture_feats["is_weekend_game"] = 1.0
@@ -355,7 +410,16 @@ def engineer_historical_features(
 
         features.append(feature_row)
 
-    return pd.DataFrame(features)
+    metadata = [
+        "player_id",
+        "player_name",
+        "team_id",
+        "gameweek",
+        "chance_of_playing",
+    ]
+    return pd.DataFrame(features).reindex(
+        columns=metadata + FEATURE_COLS + ["actual_points"]
+    )
 
 
 def process_season(
@@ -421,7 +485,7 @@ def process_season(
     output_files = []
 
     for gw in sorted(gw_data.keys()):
-        gw_df = gw_data[gw]
+        gw_df = aggregate_gameweek_rows(gw_data[gw])
 
         if gw >= min_gameweek:
             # Engineer features using accumulated history
@@ -478,6 +542,14 @@ def process_season(
                     "own_goals": int(row.get("own_goals", 0) or 0),
                     "penalties_saved": int(row.get("penalties_saved", 0) or 0),
                     "penalties_missed": int(row.get("penalties_missed", 0) or 0),
+                    "defensive_contribution": float(
+                        row.get("defensive_contribution", 0) or 0
+                    ),
+                    "clearances_blocks_interceptions": float(
+                        row.get("clearances_blocks_interceptions", 0) or 0
+                    ),
+                    "tackles": float(row.get("tackles", 0) or 0),
+                    "recoveries": float(row.get("recoveries", 0) or 0),
                 }
             )
 

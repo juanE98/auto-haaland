@@ -6,11 +6,13 @@ and saves prediction results as Parquet to S3 for the prediction loader.
 """
 
 import io
+import json
 import logging
 import os
 from datetime import datetime, timezone
 from typing import Any
 
+import numpy as np
 import pandas as pd
 import xgboost as xgb
 from botocore.exceptions import ClientError
@@ -26,6 +28,7 @@ logger.setLevel(logging.INFO)
 BUCKET_NAME = os.getenv("BUCKET_NAME", "fpl-ml-data")
 MODEL_KEY = os.getenv("MODEL_KEY", "models/model.xgb")
 HAUL_MODEL_KEY = os.getenv("HAUL_MODEL_KEY", "models/model_haul.xgb")
+MODEL_METADATA_KEY = os.getenv("MODEL_METADATA_KEY", "models/model_metadata.json")
 AWS_ENDPOINT_URL = os.getenv("AWS_ENDPOINT_URL")  # For LocalStack
 
 # Position mapping (element_type to string)
@@ -36,12 +39,15 @@ POSITION_MAP = {
     4: "FWD",
 }
 
-# Composite scoring: blend haul probability into predicted points
-HAUL_BLEND_WEIGHT = 1.5
-
-# Team diversification: penalise 4th+ player from the same team
-TEAM_DIVERSITY_MAX = 3
-TEAM_DIVERSITY_PENALTY = 0.65
+# Ranking score rewards upside without changing expected-points semantics.
+RANK_HAUL_WEIGHT = 1.5
+DEFAULT_MODEL_METADATA = {
+    "point_slope": 1.0,
+    "point_intercept": 0.0,
+    "haul_slope": 1.0,
+    "haul_intercept": 0.0,
+    "rank_haul_weight": RANK_HAUL_WEIGHT,
+}
 
 # Cache models across warm Lambda invocations
 _cached_model = None
@@ -148,6 +154,26 @@ def load_haul_model_from_s3(
         return None
 
 
+def load_model_metadata_from_s3(
+    s3_client, bucket: str, metadata_key: str
+) -> dict[str, float]:
+    """Load optional model calibration metadata with backwards-safe defaults."""
+    try:
+        response = s3_client.get_object(Bucket=bucket, Key=metadata_key)
+        stored = json.loads(response["Body"].read().decode("utf-8"))
+    except ClientError as error:
+        if error.response.get("Error", {}).get("Code") in ("NoSuchKey", "404"):
+            logger.warning(f"Model metadata not found: s3://{bucket}/{metadata_key}")
+            return DEFAULT_MODEL_METADATA.copy()
+        raise
+
+    metadata = DEFAULT_MODEL_METADATA.copy()
+    for key in metadata:
+        if key in stored:
+            metadata[key] = float(stored[key])
+    return metadata
+
+
 def load_features_from_s3(
     s3_client,
     bucket: str,
@@ -197,40 +223,13 @@ def validate_features(df: pd.DataFrame) -> None:
         raise ValueError(f"Missing feature columns: {missing}")
 
 
-def apply_team_diversification(results_df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Apply a penalty to players ranked 4th+ within the same team.
-
-    For each team, the top TEAM_DIVERSITY_MAX players by predicted_points
-    keep their full score. Players beyond that threshold receive a
-    TEAM_DIVERSITY_PENALTY multiplier.
-
-    Args:
-        results_df: Predictions DataFrame with team_id and predicted_points.
-
-    Returns:
-        DataFrame with diversification penalty applied.
-    """
-    df = results_df.copy()
-    df["_team_rank"] = df.groupby("team_id")["predicted_points"].rank(
-        ascending=False, method="first"
-    )
-    mask = df["_team_rank"] > TEAM_DIVERSITY_MAX
-    # Progressive penalty: 0.65^1 for 4th, 0.65^2 for 5th, etc.
-    df.loc[mask, "predicted_points"] = (
-        df.loc[mask, "predicted_points"]
-        * TEAM_DIVERSITY_PENALTY ** (df.loc[mask, "_team_rank"] - TEAM_DIVERSITY_MAX)
-    ).round(2)
-    df = df.drop(columns=["_team_rank"])
-    return df
-
-
 def run_inference(
     model: xgb.XGBRegressor,
     features_df: pd.DataFrame,
     gameweek: int,
     season: str,
     haul_model: xgb.XGBClassifier | None = None,
+    model_metadata: dict[str, float] | None = None,
 ) -> pd.DataFrame:
     """
     Run model predictions on features.
@@ -248,21 +247,25 @@ def run_inference(
         season, chance_of_playing, haul_probability
     """
     X = features_df[FEATURE_COLS]
-    predictions = model.predict(X)
+    metadata = {**DEFAULT_MODEL_METADATA, **(model_metadata or {})}
+    predictions = (
+        model.predict(X) * metadata["point_slope"] + metadata["point_intercept"]
+    )
 
     # Get haul probabilities if model is available
     if haul_model is not None:
-        haul_probabilities = haul_model.predict_proba(X)[:, 1]
-        haul_probabilities = (haul_probabilities * 100).round(1)  # To percentage
+        haul_probabilities = np.clip(haul_model.predict_proba(X)[:, 1], 1e-6, 1 - 1e-6)
+        logits = np.log(haul_probabilities / (1 - haul_probabilities))
+        haul_probabilities = 1 / (
+            1 + np.exp(-(metadata["haul_slope"] * logits + metadata["haul_intercept"]))
+        )
+        haul_probabilities = (haul_probabilities * 100).round(1)
         logger.info(
             f"Haul probabilities - Mean: {haul_probabilities.mean():.1f}%, "
             f"Max: {haul_probabilities.max():.1f}%"
         )
-        # Composite scoring: blend haul probability into predicted points
-        # haul_probabilities are 0-100 percentage
-        predictions = predictions + haul_probabilities * (HAUL_BLEND_WEIGHT / 100.0)
     else:
-        haul_probabilities = [0.0] * len(features_df)
+        haul_probabilities = predictions * 0.0
         logger.info("No haul model available, setting haul_probability to 0")
 
     results = pd.DataFrame(
@@ -284,11 +287,11 @@ def run_inference(
                 "chance_of_playing", pd.Series([100] * len(features_df))
             ).astype(int),
             "haul_probability": haul_probabilities,
+            "rank_score": (
+                predictions + haul_probabilities * metadata["rank_haul_weight"] / 100.0
+            ).round(2),
         }
     )
-
-    # Apply team diversification penalty
-    results = apply_team_diversification(results)
 
     logger.info(
         f"Generated {len(results)} predictions. "
@@ -387,6 +390,9 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
     # Load haul classifier (optional, graceful fallback if not found)
     haul_model = load_haul_model_from_s3(s3_client, BUCKET_NAME, HAUL_MODEL_KEY)
+    model_metadata = load_model_metadata_from_s3(
+        s3_client, BUCKET_NAME, MODEL_METADATA_KEY
+    )
 
     # Load and validate features
     features_df = load_features_from_s3(s3_client, BUCKET_NAME, features_file)
@@ -394,7 +400,12 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
     # Run inference with both models
     predictions_df = run_inference(
-        model, features_df, gameweek, season, haul_model=haul_model
+        model,
+        features_df,
+        gameweek,
+        season,
+        haul_model=haul_model,
+        model_metadata=model_metadata,
     )
 
     # Save predictions to S3
@@ -412,8 +423,6 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
 # For local testing
 if __name__ == "__main__":
-    import json
-
     test_event = {
         "gameweek": 20,
         "season": "2024_25",

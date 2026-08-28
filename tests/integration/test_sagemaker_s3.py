@@ -275,10 +275,11 @@ class TestEndToEndTraining:
         ]
 
         for season, gw in seasons_gws:
+            season_df = training_features_dataframe.copy()
+            season_df["season"] = season
+            season_df["gameweek"] = gw
             buffer = io.BytesIO()
-            training_features_dataframe.to_parquet(
-                buffer, engine="pyarrow", index=False
-            )
+            season_df.to_parquet(buffer, engine="pyarrow", index=False)
             buffer.seek(0)
 
             s3.put_object(

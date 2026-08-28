@@ -46,7 +46,7 @@ Resources:
           AttributeType: N
         - AttributeName: position
           AttributeType: S
-        - AttributeName: haul_probability
+        - AttributeName: rank_score
           AttributeType: N
       KeySchema:
         - AttributeName: player_id
@@ -70,11 +70,11 @@ Resources:
               KeyType: RANGE
           Projection:
             ProjectionType: ALL
-        - IndexName: gameweek-haul-index
+        - IndexName: gameweek-rank-index
           KeySchema:
             - AttributeName: gameweek
               KeyType: HASH
-            - AttributeName: haul_probability
+            - AttributeName: rank_score
               KeyType: RANGE
           Projection:
             ProjectionType: ALL
@@ -224,7 +224,8 @@ Resources:
           Type: Schedule
           Properties:
             Description: Run FPL prediction pipeline weekly
-            Schedule: "cron(0 8 ? * WED *)"
+            # Friday 18:00 AEST (Queensland has no daylight-saving changes).
+            Schedule: "cron(0 8 ? * FRI *)"
             Enabled: true
 
   # SNS Alerts

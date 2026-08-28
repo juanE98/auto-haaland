@@ -65,6 +65,7 @@ make test-integration           # Integration tests (starts/stops LocalStack)
 make import-historical          # Import historical data from GitHub
 make backfill                   # Backfill current season from FPL API
 make backfill END_GW=22         # Backfill up to GW22 only
+make archive-predictions ARCHIVE_SEASON=2025_26  # Archive without deleting
 make train-local                # Train XGBoost model locally
 make train-and-upload           # Train locally and upload model to S3
 

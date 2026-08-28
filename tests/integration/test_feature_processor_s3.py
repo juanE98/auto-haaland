@@ -345,7 +345,7 @@ class TestFeatureProcessorS3Integration:
         assert len(df) == 1
         assert df.iloc[0]["player_id"] == 350
         assert df.iloc[0]["player_name"] == "Salah"
-        assert df.iloc[0]["points_last_3"] == pytest.approx(8.67, rel=0.01)
+        assert df.iloc[0]["points_last_3"] == pytest.approx(10.0, rel=0.01)
         assert df.iloc[0]["home_away"] == 1  # Home game
         assert df.iloc[0]["opponent_strength"] == 4  # Arsenal's strength
         assert "actual_points" in df.columns  # Historical mode includes target
@@ -435,7 +435,7 @@ class TestFeatureProcessorS3Integration:
         assert df.iloc[0]["points_last_3"] == 8.5
         assert "actual_points" not in df.columns  # Prediction mode excludes target
 
-    def test_end_to_end_produces_all_200_features(
+    def test_end_to_end_produces_model_contract(
         self, localstack_s3_client, clean_s3_bucket
     ):
         """Integration test verifying all 200 ML features are produced.
@@ -674,63 +674,26 @@ class TestFeatureProcessorS3Integration:
         # Verify success
         assert result["statusCode"] == 200
 
-        # Read output and verify all 200 features
+        # Read output and verify the complete model contract
         output_key = result["features_file"]
         response = s3_client.get_object(Bucket=bucket, Key=output_key)
         buffer = io.BytesIO(response["Body"].read())
         df = pd.read_parquet(buffer)
 
-        # Check all 200 features are present
         missing_features = set(FEATURE_COLS) - set(df.columns)
         assert len(missing_features) == 0, (
             f"Missing {len(missing_features)} features in output: "
             f"{sorted(missing_features)[:20]}..."
         )
 
-        # Verify metadata columns
-        assert "player_id" in df.columns
-        assert "player_name" in df.columns
-        assert "gameweek" in df.columns
-
-        # Verify target column in historical mode
-        assert "actual_points" in df.columns
-
-        # Spot check some features from each category
-        salah = df[df["player_id"] == 350].iloc[0]
-
-        # Rolling features (73)
-        assert "points_last_3" in df.columns
-        assert "expected_goals_last_3" in df.columns
-
-        # Static features (9)
-        assert salah["form_score"] == 8.5
-        assert salah["home_away"] == 1
-
-        # Bootstrap features (32)
-        assert "ep_this" in df.columns
-        assert "transfers_in_event" in df.columns
-        assert "set_piece_taker" in df.columns
-
-        # Team features (28)
-        assert "team_strength_overall" in df.columns
-        assert "team_form_score" in df.columns
-        assert "player_share_of_team_points" in df.columns
-
-        # Opponent features (24)
-        assert "opp_goals_conceded_last_3" in df.columns
-        assert "opp_defensive_rating" in df.columns
-
-        # Fixture features (16)
-        assert "fdr_current" in df.columns
-        assert "is_double_gameweek" in df.columns
-
-        # Position features (8)
-        assert "mid_goal_involvement_rate" in df.columns
-
-        # Interaction features (5)
-        assert "form_x_fixture_difficulty" in df.columns
-        assert "momentum_score" in df.columns
-
-        # Derived features (5)
-        assert "minutes_pct" in df.columns
+        expected_columns = {
+            "player_id",
+            "player_name",
+            "team_id",
+            "gameweek",
+            "chance_of_playing",
+            "actual_points",
+            *FEATURE_COLS,
+        }
+        assert set(df.columns) == expected_columns
         assert "points_per_90" in df.columns

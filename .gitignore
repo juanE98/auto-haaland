@@ -1,0 +1,110 @@
+# AI assistants
+.claude/
+CLAUDE.md
+AGENTS.md
+.agents/
+.codex/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.hypothesis/
+*.cover
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# AWS SAM
+.aws-sam/
+
+# LocalStack
+localstack-data/
+.localstack/
+
+# Jupyter
+.ipynb_checkpoints
+*.ipynb
+
+# Design files
+*.drawio
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+.temp/
+
+# Environment variables and local credentials
+.env*
+.aws/
+.secrets/
+secrets/
+credentials
+credentials.*
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Local configuration overrides
+*.local.toml
+*.local.yaml
+*.local.yml
+config.local.*
+
+# Model artifacts (large files)
+*.xgb
+*.pkl
+*.model
+models/model_metadata.json
+
+# Data files (will be in S3)
+data/
+*.parquet
+*.csv
+
+# Documentation (internal only)
+implementation-plan.md
+
+# Local AWS setup scripts (contain account ID)
+scripts/aws-oidc-setup.sh
+scripts/aws-oidc-teardown.sh
+.github/DEPLOYMENT_SETUP.md

@@ -11,6 +11,8 @@ import pandas as pd
 import pytest
 import xgboost as xgb
 
+from lambdas.common.feature_config import FEATURE_VERSION
+from sagemaker import train as container_train
 from sagemaker.train_local import (
     DEFAULT_HYPERPARAMS,
     FEATURE_COLS,
@@ -18,10 +20,13 @@ from sagemaker.train_local import (
     _has_temporal_columns,
     _temporal_train_test_split,
     evaluate_model,
+    fit_haul_calibration,
+    fit_point_calibration,
     get_feature_importance,
     load_model,
     load_training_data,
     save_model,
+    select_rank_weight,
     train_model,
     train_model_temporal,
     tune_hyperparameters,
@@ -33,8 +38,8 @@ class TestFeatureColumns:
     """Tests for feature column definitions."""
 
     def test_feature_cols_count(self):
-        """Verify correct number of feature columns (207 features)."""
-        assert len(FEATURE_COLS) == 207
+        """Verify the pruned model feature contract."""
+        assert len(FEATURE_COLS) == 94
 
     def test_feature_cols_key_names(self):
         """Verify key feature column names are present."""
@@ -45,7 +50,6 @@ class TestFeatureColumns:
             "form_score",
             "opponent_strength",
             "home_away",
-            "chance_of_playing",
             "position",
             "now_cost",
             "minutes_pct",
@@ -60,39 +64,31 @@ class TestFeatureColumns:
             "starts_last_3",
             "red_cards_last_5",
             "points_last_10",
-            # New Phase 2 bootstrap features
-            "ep_this",
-            "ep_next",
-            "points_per_game",
-            "status_available",
-            "dreamteam_count",
-            "transfers_in_event",
-            "penalties_order",
-            "total_points_rank_pct",
-            # New Phase 3 team/opponent features
-            "team_form_score",
-            "team_strength_overall",
-            "team_league_position",
-            "opp_goals_conceded_last_3",
-            "opp_clean_sheets_rate",
-            "opp_defensive_rating",
-            # New Phase 4 fixture/position/interaction features
-            "fdr_current",
+            # 2026/27 defensive contribution features
+            "defensive_contribution_last_3",
+            "clearances_blocks_interceptions_last_5",
+            "tackles_last_5",
+            "recoveries_last_5",
             "is_double_gameweek",
-            "days_since_last_game",
-            "gk_saves_per_90",
-            "def_clean_sheet_rate",
-            "mid_goal_involvement_rate",
-            "fwd_conversion_rate",
-            "form_x_fixture_difficulty",
-            "momentum_score",
+            "dgw_fixture_count",
         ]
         for col in expected_subset:
             assert col in FEATURE_COLS, f"Missing: {col}"
+        assert "ep_this" not in FEATURE_COLS
+        assert "ep_next" not in FEATURE_COLS
+        assert "team_form_score" not in FEATURE_COLS
+        assert "opponent_attack_strength" not in FEATURE_COLS
+        assert "opponent_defence_strength" not in FEATURE_COLS
+        assert "selected_by_percent" not in FEATURE_COLS
 
     def test_target_col_name(self):
         """Verify target column name."""
         assert TARGET_COL == "actual_points"
+
+    def test_container_feature_contract_matches_shared_config(self):
+        """Prevent the isolated SageMaker image from training a stale schema."""
+        assert container_train.FEATURE_COLS == FEATURE_COLS
+        assert container_train.FEATURE_VERSION == FEATURE_VERSION
 
 
 class TestValidateFeatures:
@@ -107,6 +103,23 @@ class TestValidateFeatures:
         """Verify missing feature column raises ValueError."""
         df = training_dataframe_5.drop(columns=["points_last_3"])
         with pytest.raises(ValueError, match="Missing feature columns"):
+            validate_features(df)
+
+    def test_duplicate_player_week_raises(self, training_dataframe_5):
+        training_dataframe_5 = training_dataframe_5.assign(
+            season="2025-26", gameweek=range(1, 6), player_id=100
+        )
+        df = pd.concat(
+            [training_dataframe_5, training_dataframe_5.iloc[[0]]],
+            ignore_index=True,
+        )
+        with pytest.raises(ValueError, match="Duplicate player-week rows"):
+            validate_features(df)
+
+    def test_missing_feature_values_raise(self, training_dataframe_5):
+        df = training_dataframe_5.copy()
+        df.loc[0, "points_last_3"] = None
+        with pytest.raises(ValueError, match="Missing feature values"):
             validate_features(df)
 
     def test_missing_target_column_raises(self, training_dataframe_5):
@@ -350,12 +363,11 @@ class TestDefaultHyperparameters:
     """Tests for default hyperparameters."""
 
     def test_default_objective(self):
-        """Verify default objective is quantile regression."""
-        assert DEFAULT_HYPERPARAMS["objective"] == "reg:quantileerror"
+        """Verify point predictions target the conditional mean."""
+        assert DEFAULT_HYPERPARAMS["objective"] == "reg:squarederror"
 
-    def test_default_quantile_alpha(self):
-        """Verify default quantile_alpha targets 75th percentile."""
-        assert DEFAULT_HYPERPARAMS["quantile_alpha"] == 0.75
+    def test_default_has_no_quantile_alpha(self):
+        assert "quantile_alpha" not in DEFAULT_HYPERPARAMS
 
     def test_default_n_estimators(self):
         """Verify default n_estimators."""
@@ -376,6 +388,27 @@ class TestDefaultHyperparameters:
     def test_default_colsample_bytree(self):
         """Verify default colsample_bytree for regularisation."""
         assert DEFAULT_HYPERPARAMS["colsample_bytree"] == 0.5
+
+
+class TestCalibration:
+    def test_point_calibration_recovers_linear_bias(self):
+        calibration = fit_point_calibration([1, 2, 3], [3, 5, 7])
+        assert calibration["point_slope"] == pytest.approx(2.0)
+        assert calibration["point_intercept"] == pytest.approx(1.0)
+
+    def test_haul_calibration_returns_finite_parameters(self):
+        calibration = fit_haul_calibration([0.05, 0.2, 0.7, 0.9], [0, 0, 1, 1])
+        assert calibration["haul_slope"] > 0
+        assert abs(calibration["haul_intercept"]) < 10
+
+    def test_rank_weight_selects_best_validation_ranking(self):
+        weight = select_rank_weight(
+            point_predictions=[3.0, 2.0, 1.0],
+            haul_probabilities=[0.0, 1.0, 0.0],
+            actual_points=[3.0, 5.0, 1.0],
+            candidates=(0.0, 1.0, 3.0),
+        )
+        assert weight == 3.0
 
 
 class TestTemporalHelpers:
@@ -527,7 +560,7 @@ class TestTuneHyperparameters:
         assert "max_depth" in best_params
         assert "learning_rate" in best_params
         assert "objective" in best_params
-        assert best_params["objective"] == "reg:quantileerror"
+        assert best_params["objective"] == "reg:squarederror"
 
     def test_returns_valid_hyperparameter_ranges(self, training_dataframe_100):
         """Verify tuned values are within expected search space."""

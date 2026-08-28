@@ -134,12 +134,15 @@ def get_team_strength(teams: List[Dict], team_id: int) -> int:
     """Get team strength (1-5) for a given team ID."""
     for team in teams:
         if team["id"] == team_id:
-            return team.get("strength", 3)
+            return team.get("strength") or 3
     return 3  # Default to medium strength
 
 
 def get_opponent_info(
-    player_team_id: int, fixtures: List[Dict], teams: List[Dict]
+    player_team_id: int,
+    fixtures: List[Dict],
+    teams: List[Dict],
+    gameweek: int | None = None,
 ) -> Tuple[int, int, int, int]:
     """
     Get opponent strength and home/away status from fixtures.
@@ -148,34 +151,43 @@ def get_opponent_info(
         player_team_id: The player's team ID
         fixtures: List of fixture data
         teams: List of team data
+        gameweek: Optional gameweek used to filter the full fixture list
 
     Returns:
         Tuple of (opponent_strength, is_home, opp_attack_strength,
         opp_defence_strength) where is_home is 1 or 0
     """
     for fixture in fixtures:
+        if gameweek is not None and fixture.get("event") not in (None, gameweek):
+            continue
         if fixture.get("team_h") == player_team_id:
             # Player's team is home, opponent is away
             opponent_id = fixture.get("team_a")
+            difficulty = fixture.get("team_h_difficulty") or get_team_strength(
+                teams, opponent_id
+            )
             opp_attack = 1200
             opp_defence = 1200
             for team in teams:
                 if team["id"] == opponent_id:
-                    opp_attack = team.get("strength_attack_away", 1200)
-                    opp_defence = team.get("strength_defence_away", 1200)
+                    opp_attack = team.get("strength_attack_away") or 1200
+                    opp_defence = team.get("strength_defence_away") or 1200
                     break
-            return get_team_strength(teams, opponent_id), 1, opp_attack, opp_defence
+            return difficulty, 1, opp_attack, opp_defence
         elif fixture.get("team_a") == player_team_id:
             # Player's team is away, opponent is home
             opponent_id = fixture.get("team_h")
+            difficulty = fixture.get("team_a_difficulty") or get_team_strength(
+                teams, opponent_id
+            )
             opp_attack = 1200
             opp_defence = 1200
             for team in teams:
                 if team["id"] == opponent_id:
-                    opp_attack = team.get("strength_attack_home", 1200)
-                    opp_defence = team.get("strength_defence_home", 1200)
+                    opp_attack = team.get("strength_attack_home") or 1200
+                    opp_defence = team.get("strength_defence_home") or 1200
                     break
-            return get_team_strength(teams, opponent_id), 0, opp_attack, opp_defence
+            return difficulty, 0, opp_attack, opp_defence
 
     # No fixture found (could be blank gameweek)
     return 3, 0, 1200, 1200
@@ -272,8 +284,9 @@ def engineer_features(
         player_id = player["id"]
         team_id = player["team"]
 
-        # Get player history if available
-        history = player_histories.get(player_id, [])
+        # Current and future results are targets, never model inputs.
+        full_history = player_histories.get(player_id, [])
+        history = [h for h in full_history if h.get("round", 0) < gameweek]
 
         # Calculate rolling features from history
         if history:
@@ -299,7 +312,7 @@ def engineer_features(
 
         # Get opponent info from fixtures
         opponent_strength, home_away, opp_attack_strength, opp_defence_strength = (
-            get_opponent_info(team_id, fixtures, teams)
+            get_opponent_info(team_id, fixtures, teams, gameweek)
         )
 
         # Static features
@@ -414,15 +427,12 @@ def engineer_features(
         row.update(derived)  # 5 features
 
         # Add actual points for historical mode (training target)
-        if mode == "historical" and history:
+        if mode == "historical" and full_history:
             # Get actual points for this gameweek from history
-            gw_data = [h for h in history if h.get("round") == gameweek]
+            gw_data = [h for h in full_history if h.get("round") == gameweek]
             if gw_data:
-                row["actual_points"] = gw_data[0].get("total_points", 0)
-            else:
-                # Use last known points
-                row["actual_points"] = (
-                    history[-1].get("total_points", 0) if history else 0
+                row["actual_points"] = sum(
+                    entry.get("total_points", 0) for entry in gw_data
                 )
 
         features.append(row)
@@ -435,7 +445,15 @@ def engineer_features(
     if missing:
         logger.warning(f"Missing {len(missing)} features: {sorted(missing)[:10]}...")
 
-    return df
+    metadata = [
+        "player_id",
+        "player_name",
+        "team_id",
+        "gameweek",
+        "chance_of_playing",
+    ]
+    target = ["actual_points"] if "actual_points" in df.columns else []
+    return df.reindex(columns=metadata + FEATURE_COLS + target)
 
 
 def save_features_to_s3(

@@ -20,8 +20,10 @@ from pathlib import Path
 from typing import Optional
 
 import boto3
+import numpy as np
 import pandas as pd
 import xgboost as xgb
+from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
     accuracy_score,
     f1_score,
@@ -50,8 +52,7 @@ logger = logging.getLogger(__name__)
 
 # Default hyperparameters for regression model
 DEFAULT_HYPERPARAMS = {
-    "objective": "reg:quantileerror",
-    "quantile_alpha": 0.75,
+    "objective": "reg:squarederror",
     "n_estimators": 100,
     "max_depth": 6,
     "learning_rate": 0.1,
@@ -74,6 +75,74 @@ HAUL_CLASSIFIER_HYPERPARAMS = {
 
 # Haul threshold (10+ points is considered a haul)
 HAUL_THRESHOLD = 10
+
+
+def fit_point_calibration(predictions, actual_points) -> dict[str, float]:
+    """Fit a linear correction for systematic point-prediction bias."""
+    predictions = np.asarray(predictions, dtype=float)
+    actual_points = np.asarray(actual_points, dtype=float)
+    if len(predictions) < 2 or np.ptp(predictions) == 0:
+        return {"point_slope": 1.0, "point_intercept": 0.0}
+    slope, intercept = np.polyfit(predictions, actual_points, 1)
+    return {
+        "point_slope": max(0.0, float(slope)),
+        "point_intercept": float(intercept),
+    }
+
+
+def fit_haul_calibration(probabilities, outcomes) -> dict[str, float]:
+    """Fit Platt scaling parameters to raw haul probabilities."""
+    probabilities = np.clip(np.asarray(probabilities, dtype=float), 1e-6, 1 - 1e-6)
+    outcomes = np.asarray(outcomes, dtype=int)
+    if len(np.unique(outcomes)) < 2:
+        return {"haul_slope": 1.0, "haul_intercept": 0.0}
+    logits = np.log(probabilities / (1 - probabilities)).reshape(-1, 1)
+    calibrator = LogisticRegression().fit(logits, outcomes)
+    return {
+        "haul_slope": float(calibrator.coef_[0, 0]),
+        "haul_intercept": float(calibrator.intercept_[0]),
+    }
+
+
+def select_rank_weight(
+    point_predictions,
+    haul_probabilities,
+    actual_points,
+    candidates=(0.0, 0.5, 1.0, 1.5, 2.0),
+) -> float:
+    """Select the haul weight with the best validation rank correlation."""
+    points = np.asarray(point_predictions, dtype=float)
+    haul = np.asarray(haul_probabilities, dtype=float)
+    actual_ranks = pd.Series(actual_points).rank().to_numpy()
+    best_weight = float(candidates[0])
+    best_score = float("-inf")
+    for weight in candidates:
+        score_ranks = pd.Series(points + haul * weight).rank().to_numpy()
+        score = float(np.corrcoef(score_ranks, actual_ranks)[0, 1])
+        if score > best_score:
+            best_score = score
+            best_weight = float(weight)
+    return best_weight
+
+
+def apply_haul_calibration(probabilities, metadata: dict[str, float]):
+    """Apply stored Platt scaling parameters to haul probabilities."""
+    probabilities = np.clip(np.asarray(probabilities, dtype=float), 1e-6, 1 - 1e-6)
+    logits = np.log(probabilities / (1 - probabilities))
+    return 1 / (
+        1 + np.exp(-(metadata["haul_slope"] * logits + metadata["haul_intercept"]))
+    )
+
+
+def save_model_metadata(metadata: dict[str, float], output_path: str) -> str:
+    """Save calibration and ranking parameters beside the model."""
+    path = Path(output_path)
+    output_dir = path if path.suffix == "" else path.parent
+    output_dir.mkdir(parents=True, exist_ok=True)
+    metadata_path = output_dir / "model_metadata.json"
+    with open(metadata_path, "w") as metadata_file:
+        json.dump(metadata, metadata_file, indent=2)
+    return str(metadata_path)
 
 
 def load_training_data(
@@ -146,6 +215,18 @@ def validate_features(df: pd.DataFrame) -> None:
             f"Missing target column '{TARGET_COL}'. "
             "Ensure data was generated in 'historical' mode."
         )
+
+    missing_values = df[FEATURE_COLS].columns[df[FEATURE_COLS].isna().any()].tolist()
+    if missing_values:
+        raise ValueError(f"Missing feature values: {missing_values}")
+
+    key_columns = [
+        column for column in ("season", "gameweek", "player_id") if column in df.columns
+    ]
+    if {"gameweek", "player_id"}.issubset(key_columns) and df.duplicated(
+        key_columns
+    ).any():
+        raise ValueError(f"Duplicate player-week rows for key {key_columns}")
 
 
 def train_model(
@@ -376,8 +457,7 @@ def tune_hyperparameters(
 
     def objective(trial):
         params = {
-            "objective": "reg:quantileerror",
-            "quantile_alpha": 0.75,
+            "objective": "reg:squarederror",
             "n_estimators": trial.suggest_int("n_estimators", 100, 500),
             "max_depth": trial.suggest_int("max_depth", 3, 8),
             "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.3, log=True),
@@ -410,8 +490,7 @@ def tune_hyperparameters(
     study.optimize(objective, n_trials=n_trials)
 
     best_params = study.best_params
-    best_params["objective"] = "reg:quantileerror"
-    best_params["quantile_alpha"] = 0.75
+    best_params["objective"] = "reg:squarederror"
     best_params["random_state"] = 42
 
     logger.info(f"Best trial MAE: {study.best_value:.3f}")
@@ -832,11 +911,13 @@ def main():
 
     # Save model
     model_path = save_model(model, args.output_path)
-
-    # Upload to S3 if requested
-    if args.upload_s3:
-        s3_uri = upload_model_to_s3(model_path, args.bucket, args.model_key)
-        logger.info(f"Model uploaded to: {s3_uri}")
+    model_metadata = {
+        **fit_point_calibration(model.predict(X_test), y_test),
+        "haul_slope": 1.0,
+        "haul_intercept": 0.0,
+        "rank_haul_weight": 1.5,
+    }
+    haul_model_path = None
 
     logger.info("Regression model training complete!")
     logger.info(f"Model saved to: {model_path}")
@@ -867,15 +948,34 @@ def main():
         haul_model.save_model(str(haul_model_path))
         logger.info(f"Haul classifier saved to {haul_model_path}")
 
-        # Upload haul classifier to S3 if requested
-        if args.upload_s3:
-            haul_model_key = args.model_key.replace("model.xgb", "model_haul.xgb")
-            s3_uri = upload_model_to_s3(
-                str(haul_model_path), args.bucket, haul_model_key
-            )
-            logger.info(f"Haul classifier uploaded to: {s3_uri}")
+        raw_haul_probabilities = haul_model.predict_proba(X_test_haul)[:, 1]
+        model_metadata.update(fit_haul_calibration(raw_haul_probabilities, y_test_haul))
+        calibrated_haul_probabilities = apply_haul_calibration(
+            raw_haul_probabilities, model_metadata
+        )
+        calibrated_points = (
+            model.predict(X_test_haul) * model_metadata["point_slope"]
+            + model_metadata["point_intercept"]
+        )
+        actual_points = df.loc[X_test_haul.index, TARGET_COL]
+        model_metadata["rank_haul_weight"] = select_rank_weight(
+            calibrated_points,
+            calibrated_haul_probabilities,
+            actual_points,
+        )
 
         logger.info(f"Haul classifier ROC AUC: {haul_metrics['roc_auc']:.3f}")
+
+    metadata_path = save_model_metadata(model_metadata, args.output_path)
+    logger.info(f"Model metadata saved to: {metadata_path}")
+
+    if args.upload_s3:
+        upload_model_to_s3(model_path, args.bucket, args.model_key)
+        metadata_key = str(Path(args.model_key).with_name("model_metadata.json"))
+        upload_model_to_s3(metadata_path, args.bucket, metadata_key)
+        if haul_model_path:
+            haul_model_key = str(Path(args.model_key).with_name("model_haul.xgb"))
+            upload_model_to_s3(str(haul_model_path), args.bucket, haul_model_key)
 
 
 if __name__ == "__main__":

@@ -43,8 +43,8 @@ from lambdas.common.feature_categories.team_features import (  # noqa: E402
     _count_games_at_current_team,
 )
 from lambdas.common.feature_config import (  # noqa: E402
+    BOOTSTRAP_FEATURES,
     FEATURE_COLS,
-    compute_bootstrap_features,
     compute_derived_features,
     compute_rolling_features,
 )
@@ -59,6 +59,33 @@ logger = logging.getLogger(__name__)
 # Batch size for player summary API calls
 BATCH_SIZE = 50
 BATCH_DELAY = 1.0  # Seconds between batches
+
+ADDITIVE_HISTORY_FIELDS = {
+    "total_points",
+    "minutes",
+    "goals_scored",
+    "assists",
+    "clean_sheets",
+    "bps",
+    "ict_index",
+    "threat",
+    "creativity",
+    "influence",
+    "bonus",
+    "yellow_cards",
+    "saves",
+    "expected_goals",
+    "expected_assists",
+    "starts",
+    "red_cards",
+    "own_goals",
+    "penalties_saved",
+    "penalties_missed",
+    "defensive_contribution",
+    "clearances_blocks_interceptions",
+    "tackles",
+    "recoveries",
+}
 
 
 def get_finished_gameweeks(events: list[dict]) -> list[int]:
@@ -190,7 +217,14 @@ def get_gameweek_entry(history: list[dict], gameweek: int) -> dict | None:
         History dict for the gameweek, or None if not found
     """
     entries = [h for h in history if h.get("round") == gameweek]
-    return entries[0] if entries else None
+    if not entries:
+        return None
+
+    combined = entries[-1].copy()
+    for field in ADDITIVE_HISTORY_FIELDS:
+        combined[field] = sum(float(entry.get(field, 0) or 0) for entry in entries)
+    combined["fixture_count"] = len(entries)
+    return combined
 
 
 def get_fixture_info(
@@ -219,7 +253,8 @@ def get_fixture_info(
             opponent_id = fixture.get("team_a")
             ad = ad_map.get(opponent_id, {})
             return (
-                team_strength_map.get(opponent_id, 3),
+                fixture.get("team_h_difficulty")
+                or team_strength_map.get(opponent_id, 3),
                 1,
                 ad.get("attack_away", 1200),
                 ad.get("defence_away", 1200),
@@ -229,7 +264,8 @@ def get_fixture_info(
             opponent_id = fixture.get("team_h")
             ad = ad_map.get(opponent_id, {})
             return (
-                team_strength_map.get(opponent_id, 3),
+                fixture.get("team_a_difficulty")
+                or team_strength_map.get(opponent_id, 3),
                 0,
                 ad.get("attack_home", 1200),
                 ad.get("defence_home", 1200),
@@ -296,7 +332,7 @@ def engineer_backfill_features(
         )
 
         # Selected by percent (ownership from bootstrap)
-        selected_by_percent = float(player.get("selected_by_percent", 0) or 0)
+        selected_by_percent = 0.0
 
         # Chance of playing: not reliably available historically
         chance_of_playing = 100
@@ -311,15 +347,16 @@ def engineer_backfill_features(
             "opponent_attack_strength": opp_attack_strength,
             "opponent_defence_strength": opp_defence_strength,
             "selected_by_percent": selected_by_percent,
-            "now_cost": player.get("now_cost", 0),
+            "now_cost": gw_entry.get("value", 0),
         }
 
         # Derived features
         derived = compute_derived_features(prior_history, rolling, static)
 
-        # Bootstrap features (computed from player data available at backfill time)
-        # Note: Some features like ranking require all_players which we pass
-        bootstrap = compute_bootstrap_features(player, all_players=players)
+        # Current bootstrap totals include the target and later gameweeks, so
+        # they cannot be reconstructed safely for historical rows.
+        bootstrap = {feat: 0.0 for feat in BOOTSTRAP_FEATURES}
+        bootstrap["status_available"] = 1.0
 
         # Team and opponent features (default values for backfill)
         # Full computation would require team fixtures data not passed here
@@ -338,7 +375,9 @@ def engineer_backfill_features(
         fixture_feats["fdr_current"] = 3.0  # Default medium difficulty
         fixture_feats["fdr_next_3_avg"] = 3.0
         fixture_feats["fdr_next_5_avg"] = 3.0
-        fixture_feats["dgw_fixture_count"] = 1.0  # Single fixture
+        fixture_count = int(gw_entry.get("fixture_count", 1) or 1)
+        fixture_feats["dgw_fixture_count"] = float(fixture_count)
+        fixture_feats["is_double_gameweek"] = 1.0 if fixture_count > 1 else 0.0
         fixture_feats["days_since_last_game"] = 7.0
         fixture_feats["kickoff_hour"] = 15.0  # Default 3pm
         fixture_feats["is_weekend_game"] = 1.0
@@ -366,7 +405,16 @@ def engineer_backfill_features(
 
         features.append(feature_row)
 
-    return pd.DataFrame(features)
+    metadata = [
+        "player_id",
+        "player_name",
+        "team_id",
+        "gameweek",
+        "chance_of_playing",
+    ]
+    return pd.DataFrame(features).reindex(
+        columns=metadata + FEATURE_COLS + ["actual_points"]
+    )
 
 
 def upload_to_s3(

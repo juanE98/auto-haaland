@@ -197,7 +197,7 @@ def get_top_predictions():
         gameweek (required): Gameweek number
         position (optional): Filter by position (GKP, DEF, MID, FWD)
         limit (optional): Max results (default 10)
-        sort_by (optional): Sort by 'points' (default) or 'haul'
+        sort_by (optional): Sort by 'points' (default), 'rank', or 'haul'
         available_only (optional): Exclude unavailable players (default true)
     """
     gameweek = app.current_event.get_query_string_value("gameweek")
@@ -219,10 +219,10 @@ def get_top_predictions():
 
     limit = int(app.current_event.get_query_string_value("limit", "10"))
 
-    # Sort by predicted_points (default) or haul_probability
+    # Haul remains available for older clients, but rank is the new upside score.
     sort_by = app.current_event.get_query_string_value("sort_by", "points")
-    if sort_by not in ("points", "haul"):
-        raise BadRequestError("sort_by must be 'points' or 'haul'")
+    if sort_by not in ("points", "rank", "haul"):
+        raise BadRequestError("sort_by must be 'points', 'rank', or 'haul'")
 
     # Filter out unavailable players by default
     available_only_param = app.current_event.get_query_string_value(
@@ -243,16 +243,29 @@ def get_top_predictions():
 
     table = get_table()
 
-    # Choose index based on sort order
-    if sort_by == "haul":
-        index_name = "gameweek-haul-index"
-    else:
-        index_name = "gameweek-points-index"
+    index_name = "gameweek-rank-index" if sort_by == "rank" else "gameweek-points-index"
 
     # Fetch more items to account for filtering (unavailable players, position)
     fetch_limit = limit * 3
 
-    if position:
+    if sort_by == "haul":
+        # The haul GSI was replaced by rank_score. Query the small gameweek
+        # partition and sort in memory for backwards compatibility.
+        response = table.query(
+            IndexName=index_name,
+            KeyConditionExpression=Key("gameweek").eq(gameweek),
+            ScanIndexForward=False,
+        )
+        items = response.get("Items", [])
+        while response.get("LastEvaluatedKey"):
+            response = table.query(
+                IndexName=index_name,
+                KeyConditionExpression=Key("gameweek").eq(gameweek),
+                ScanIndexForward=False,
+                ExclusiveStartKey=response["LastEvaluatedKey"],
+            )
+            items.extend(response.get("Items", []))
+    elif position:
         # Position filter requires fetching from gameweek index and filtering
         response = table.query(
             IndexName=index_name,
@@ -277,6 +290,9 @@ def get_top_predictions():
     # Filter out unavailable players (chance_of_playing = 0)
     if available_only:
         items = [item for item in items if item.get("chance_of_playing", 100) > 0]
+
+    if sort_by == "haul":
+        items.sort(key=lambda item: item.get("haul_probability", 0), reverse=True)
 
     # Apply final limit
     items = items[:limit]

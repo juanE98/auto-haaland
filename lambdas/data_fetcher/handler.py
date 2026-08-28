@@ -106,7 +106,9 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
             # === 2. Fetch and save fixtures ===
             logger.info(f"Fetching fixtures for gameweek {gameweek}...")
-            fixtures = fpl.get_fixtures(gameweek=gameweek)
+            # Feature engineering needs past and future fixtures for team form,
+            # fixture runs, blank gameweeks, and double gameweeks.
+            fixtures = fpl.get_fixtures()
 
             fixtures_key = f"raw/season_{season}/gw{gameweek}_fixtures.json"
             save_to_s3(s3_client, BUCKET_NAME, fixtures_key, fixtures)

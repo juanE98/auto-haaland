@@ -119,6 +119,11 @@ class TestGetTeamStrength:
         result = get_team_strength(teams, team_id=1)
         assert result == 3  # Default
 
+    def test_get_team_strength_null_field(self):
+        """Preseason API nulls should use the neutral default."""
+        teams = [{"id": 1, "name": "Arsenal", "strength": None}]
+        assert get_team_strength(teams, team_id=1) == 3
+
 
 class TestGetOpponentInfo:
     """Tests for get_opponent_info function."""
@@ -208,6 +213,51 @@ class TestGetOpponentInfo:
         assert is_home == 0
         assert opp_attack == 1200  # Default
         assert opp_defence == 1200  # Default
+
+    def test_null_preseason_strengths_use_defaults(self):
+        fixtures = [{"team_h": 1, "team_a": 2}]
+        teams = [
+            {
+                "id": 2,
+                "strength": None,
+                "strength_attack_away": None,
+                "strength_defence_away": None,
+            }
+        ]
+
+        result = get_opponent_info(1, fixtures, teams)
+
+        assert result == (3, 1, 1200, 1200)
+
+    def test_selects_fixture_for_requested_gameweek(self):
+        fixtures = [
+            {"event": 1, "team_h": 1, "team_a": 2},
+            {"event": 2, "team_h": 1, "team_a": 3},
+        ]
+        teams = [
+            {"id": 2, "strength": 2},
+            {"id": 3, "strength": 5},
+        ]
+
+        result = get_opponent_info(1, fixtures, teams, gameweek=2)
+
+        assert result[0] == 5
+
+    def test_prefers_fixture_difficulty_over_missing_team_strength(self):
+        fixtures = [
+            {
+                "event": 1,
+                "team_h": 1,
+                "team_a": 2,
+                "team_h_difficulty": 4,
+                "team_a_difficulty": 2,
+            }
+        ]
+        teams = [{"id": 2, "strength": None}]
+
+        result = get_opponent_info(1, fixtures, teams, gameweek=1)
+
+        assert result[0] == 4
 
 
 class TestEngineerFeatures:
@@ -360,7 +410,9 @@ class TestEngineerFeatures:
         salah = df[df["player_id"] == 350].iloc[0]
         assert salah["player_name"] == "Salah"
         assert salah["gameweek"] == 20
-        assert salah["points_last_3"] == pytest.approx(8.67, rel=0.01)  # (8+12+6)/3
+        # Current-GW points are the target and must not leak into features.
+        assert salah["points_last_3"] == pytest.approx(10.0)  # (8+12)/2
+        assert salah["actual_points"] == 6
         assert salah["home_away"] == 1  # Home game
         assert salah["opponent_strength"] == 4  # Arsenal
         assert "actual_points" in df.columns  # Historical mode includes target
@@ -415,10 +467,10 @@ class TestEngineerFeatures:
         # 8.5 * 4 = 34.0
         assert salah["form_x_difficulty"] == pytest.approx(34.0, rel=0.01)
 
-    def test_engineer_features_produces_all_207_features(
+    def test_engineer_features_produces_all_94_features(
         self, sample_bootstrap, sample_fixtures, sample_histories
     ):
-        """Test that engineer_features produces all 207 ML features.
+        """Test that engineer_features produces all 94 ML features.
 
         This is a regression test to ensure the feature processor
         computes all feature categories and doesn't regress to fewer features.
@@ -437,26 +489,32 @@ class TestEngineerFeatures:
             gameweek=20,
         )
 
-        # Verify all 207 features are present
+        # Verify all model features are present
         missing_features = set(FEATURE_COLS) - set(df.columns)
         assert (
             len(missing_features) == 0
         ), f"Missing {len(missing_features)} features: {sorted(missing_features)}"
 
-        # Verify exact count (207 features + metadata columns)
-        metadata_cols = ["player_id", "player_name", "team_id", "gameweek"]
+        # Verify exact model schema plus response metadata
+        metadata_cols = [
+            "player_id",
+            "player_name",
+            "team_id",
+            "gameweek",
+            "chance_of_playing",
+        ]
         target_cols = ["actual_points"]
         feature_cols_in_df = [
             c for c in df.columns if c not in metadata_cols + target_cols
         ]
         assert (
-            len(feature_cols_in_df) == 207
-        ), f"Expected 207 features, got {len(feature_cols_in_df)}"
+            len(feature_cols_in_df) == 94
+        ), f"Expected 94 features, got {len(feature_cols_in_df)}"
 
     def test_engineer_features_no_history_produces_all_features(
         self, sample_bootstrap, sample_fixtures
     ):
-        """Test that all 207 features are produced even without player history.
+        """Test that all 94 features are produced even without player history.
 
         Ensures the fallback paths also compute all feature categories.
         """

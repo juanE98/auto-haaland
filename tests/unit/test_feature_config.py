@@ -37,25 +37,25 @@ from lambdas.common.feature_config import (
 
 @pytest.mark.unit
 class TestFeatureList:
-    def test_feature_cols_has_207_entries(self):
-        """FEATURE_COLS should contain exactly 207 features."""
-        assert len(FEATURE_COLS) == 207
+    def test_feature_cols_has_94_entries(self):
+        """The model uses only historically reproducible features."""
+        assert len(FEATURE_COLS) == 94
 
     def test_no_duplicate_feature_names(self):
         """All feature names should be unique."""
         assert len(FEATURE_COLS) == len(set(FEATURE_COLS))
 
     def test_rolling_feature_names_count(self):
-        """Rolling features: 73 total (36 original + 37 new in Phase 1)."""
-        assert len(ROLLING_FEATURE_NAMES) == 73
+        """Rolling features include the 2026/27 defensive signals."""
+        assert len(ROLLING_FEATURE_NAMES) == 82
 
     def test_static_features_count(self):
         """Static features should have 9 entries."""
         assert len(STATIC_FEATURES) == 9
 
     def test_bootstrap_features_count(self):
-        """Bootstrap features should have 32 entries (Phase 2)."""
-        assert len(BOOTSTRAP_FEATURES) == 32
+        """Bootstrap features exclude FPL's own expected-points estimates."""
+        assert len(BOOTSTRAP_FEATURES) == 30
 
     def test_team_features_count(self):
         """Team features should have 35 entries."""
@@ -82,19 +82,37 @@ class TestFeatureList:
         assert len(DERIVED_FEATURES) == 5
 
     def test_feature_cols_composition(self):
-        """FEATURE_COLS = all feature categories combined."""
+        """FEATURE_COLS excludes live-only feature categories."""
         expected = (
             ROLLING_FEATURE_NAMES
-            + STATIC_FEATURES
-            + BOOTSTRAP_FEATURES
-            + TEAM_FEATURES
-            + OPPONENT_FEATURES
-            + FIXTURE_FEATURES
-            + POSITION_FEATURES
-            + INTERACTION_FEATURES
+            + [
+                feature
+                for feature in STATIC_FEATURES
+                if feature
+                not in {
+                    "chance_of_playing",
+                    "opponent_attack_strength",
+                    "opponent_defence_strength",
+                    "selected_by_percent",
+                }
+            ]
+            + ["is_double_gameweek", "dgw_fixture_count"]
             + DERIVED_FEATURES
         )
         assert FEATURE_COLS == expected
+
+    def test_live_only_features_are_not_model_inputs(self):
+        for feature in (
+            "points_per_game",
+            "team_form_score",
+            "opp_defensive_rating",
+            "fdr_next_5_avg",
+            "momentum_score",
+            "opponent_attack_strength",
+            "opponent_defence_strength",
+            "selected_by_percent",
+        ):
+            assert feature not in FEATURE_COLS
 
     def test_target_col(self):
         """Target column should be 'actual_points'."""
@@ -160,6 +178,11 @@ class TestFeatureList:
             "yellow_cards_last_10",
             "saves_last_10",
             "transfers_balance_last_10",
+            # 2026/27 defensive contribution scoring
+            "defensive_contribution_last_1",
+            "clearances_blocks_interceptions_last_3",
+            "tackles_last_5",
+            "recoveries_last_5",
         ]
         for feat in expected:
             assert feat in FEATURE_COLS, f"Missing feature: {feat}"
@@ -201,9 +224,9 @@ class TestFeatureList:
 
     def test_bootstrap_features_present(self):
         """Verify all bootstrap feature categories are present."""
-        # FPL Expected Points & Value
-        assert "ep_this" in BOOTSTRAP_FEATURES
-        assert "ep_next" in BOOTSTRAP_FEATURES
+        # Do not train on FPL's own prediction, which masks model quality.
+        assert "ep_this" not in BOOTSTRAP_FEATURES
+        assert "ep_next" not in BOOTSTRAP_FEATURES
         assert "points_per_game" in BOOTSTRAP_FEATURES
         assert "value_form" in BOOTSTRAP_FEATURES
 
@@ -353,6 +376,10 @@ class TestComputeRollingFeatures:
                 "own_goals": 0,
                 "penalties_saved": 0,
                 "penalties_missed": 0,
+                "defensive_contribution": 0,
+                "clearances_blocks_interceptions": 2,
+                "tackles": 1,
+                "recoveries": 3,
             },
             {
                 "total_points": 4,
@@ -378,6 +405,10 @@ class TestComputeRollingFeatures:
                 "own_goals": 0,
                 "penalties_saved": 0,
                 "penalties_missed": 0,
+                "defensive_contribution": 2,
+                "clearances_blocks_interceptions": 8,
+                "tackles": 2,
+                "recoveries": 5,
             },
             {
                 "total_points": 10,
@@ -403,12 +434,16 @@ class TestComputeRollingFeatures:
                 "own_goals": 0,
                 "penalties_saved": 0,
                 "penalties_missed": 1,
+                "defensive_contribution": 2,
+                "clearances_blocks_interceptions": 10,
+                "tackles": 3,
+                "recoveries": 7,
             },
         ]
 
-    def test_returns_73_features(self, sample_history):
+    def test_returns_82_features(self, sample_history):
         result = compute_rolling_features(sample_history)
-        assert len(result) == 73
+        assert len(result) == 82
 
     def test_all_feature_names_present(self, sample_history):
         result = compute_rolling_features(sample_history)
@@ -455,6 +490,13 @@ class TestComputeRollingFeatures:
         result = compute_rolling_features(sample_history)
         # avg(0, 0, 1) = 0.33
         assert result["penalties_missed_last_3"] == pytest.approx(0.33, abs=0.01)
+
+    def test_defensive_contribution_features(self, sample_history):
+        result = compute_rolling_features(sample_history)
+        assert result["defensive_contribution_last_3"] == pytest.approx(1.33)
+        assert result["clearances_blocks_interceptions_last_3"] == pytest.approx(6.67)
+        assert result["tackles_last_5"] == pytest.approx(2.0)
+        assert result["recoveries_last_5"] == pytest.approx(5.0)
 
     def test_extended_window_10_with_short_history(self, sample_history):
         """Window 10 should work with only 3 games of history."""
@@ -593,19 +635,19 @@ class TestComputeBootstrapFeatures:
             "ict_index": "250.5",
         }
 
-    def test_returns_32_features(self, sample_player):
+    def test_returns_30_features(self, sample_player):
         result = compute_bootstrap_features(sample_player)
-        assert len(result) == 32
+        assert len(result) == 30
 
     def test_all_feature_names_present(self, sample_player):
         result = compute_bootstrap_features(sample_player)
         for name in BOOTSTRAP_FEATURES:
             assert name in result, f"Missing: {name}"
 
-    def test_ep_this_and_ep_next(self, sample_player):
+    def test_ep_this_and_ep_next_are_excluded(self, sample_player):
         result = compute_bootstrap_features(sample_player)
-        assert result["ep_this"] == pytest.approx(8.5)
-        assert result["ep_next"] == pytest.approx(7.2)
+        assert "ep_this" not in result
+        assert "ep_next" not in result
 
     def test_status_flags(self, sample_player):
         result = compute_bootstrap_features(sample_player)
@@ -673,8 +715,8 @@ class TestComputeBootstrapFeatures:
     def test_empty_player(self):
         """Test with minimal player data."""
         result = compute_bootstrap_features({})
-        assert len(result) == 32
-        assert result["ep_this"] == 0.0
+        assert len(result) == 30
+        assert "ep_this" not in result
         assert result["status_available"] == 1.0  # default status is 'a'
 
     def test_with_all_players_for_ranking(self, sample_player):

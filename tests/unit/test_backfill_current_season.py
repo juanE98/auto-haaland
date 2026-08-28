@@ -71,6 +71,19 @@ class TestGetGameweekEntry:
         result = get_gameweek_entry(history, 3)
         assert result is None
 
+    def test_double_gameweek_entries_are_summed(self):
+        history = [
+            {"round": 2, "total_points": 8, "minutes": 90, "value": 75},
+            {"round": 2, "total_points": 3, "minutes": 70, "value": 76},
+        ]
+
+        result = get_gameweek_entry(history, 2)
+
+        assert result["total_points"] == 11
+        assert result["minutes"] == 160
+        assert result["value"] == 76
+        assert result["fixture_count"] == 2
+
 
 # === Finished Gameweeks ===
 
@@ -154,6 +167,21 @@ class TestGetFixtureInfo:
         assert home == 0
         assert opp_attack == 1200
         assert opp_defence == 1200
+
+    def test_fixture_difficulty_overrides_team_strength(self):
+        fixtures = [
+            {
+                "team_h": 10,
+                "team_a": 5,
+                "team_h_difficulty": 5,
+                "team_a_difficulty": 2,
+            }
+        ]
+
+        strength, home, _, _ = get_fixture_info(10, fixtures, {5: 2})
+
+        assert strength == 5
+        assert home == 1
 
     def test_home_team_with_attack_defence_map(self):
         fixtures = [{"team_h": 10, "team_a": 5}]
@@ -381,6 +409,8 @@ class TestEngineerBackfillFeatures:
         assert salah["points_last_3"] == pytest.approx(6.0, abs=0.01)
         # Should NOT include GW4 score of 10
         assert salah["points_last_3"] != pytest.approx(7.33, abs=0.1)
+        # Current bootstrap totals already include GW4 and are not model inputs.
+        assert "points_per_game" not in result.columns
 
     def test_skips_players_without_gw_entry(self):
         """Players who did not play in the target GW should be excluded."""
@@ -431,6 +461,12 @@ class TestEngineerBackfillFeatures:
         )
 
         # Metadata columns + feature columns + target
-        metadata_cols = {"player_id", "player_name", "team_id", "gameweek"}
+        metadata_cols = {
+            "player_id",
+            "player_name",
+            "team_id",
+            "gameweek",
+            "chance_of_playing",
+        }
         expected_cols = metadata_cols | set(FEATURE_COLS) | {"actual_points"}
         assert set(result.columns) == expected_cols

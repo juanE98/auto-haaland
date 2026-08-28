@@ -7,6 +7,7 @@ import pytest
 
 from lambdas.common.feature_config import FEATURE_COLS
 from scripts.import_historical import (
+    aggregate_gameweek_rows,
     build_team_strength_map,
     convert_season_format,
     engineer_historical_features,
@@ -214,8 +215,27 @@ class TestEngineerHistoricalFeatures:
         result = engineer_historical_features(gw_df, 4, {}, {})
         assert result.iloc[0]["opponent_strength"] == 3
 
+    def test_uses_player_fixture_difficulty_when_available(self):
+        gw_df = self._make_gw_df(
+            [
+                {
+                    "element": 100,
+                    "name": "Player",
+                    "team": 1,
+                    "element_type": 3,
+                    "opponent_team": 5,
+                    "difficulty": 5,
+                    "total_points": 2,
+                }
+            ]
+        )
+
+        result = engineer_historical_features(gw_df, 4, {}, {5: 2})
+
+        assert result.iloc[0]["opponent_strength"] == 5
+
     def test_double_gameweek_players(self):
-        """Players appearing twice in a GW should produce two rows."""
+        """A double gameweek should remain one player-week training sample."""
         gw_df = self._make_gw_df(
             [
                 {
@@ -242,7 +262,53 @@ class TestEngineerHistoricalFeatures:
         )
 
         result = engineer_historical_features(gw_df, 5, {}, {5: 4, 10: 3})
-        assert len(result) == 2
+        assert len(result) == 1
+        assert result.iloc[0]["actual_points"] == 11
+        assert result.iloc[0]["dgw_fixture_count"] == 2
+
+    def test_gameweek_aggregation_sums_match_stats_not_snapshots(self):
+        gw_df = self._make_gw_df(
+            [
+                {
+                    "element": 100,
+                    "total_points": 8,
+                    "minutes": 90,
+                    "transfers_in": 120,
+                    "selected": 5000,
+                },
+                {
+                    "element": 100,
+                    "total_points": 3,
+                    "minutes": 70,
+                    "transfers_in": 140,
+                    "selected": 5100,
+                },
+            ]
+        )
+
+        result = aggregate_gameweek_rows(gw_df)
+
+        assert len(result) == 1
+        assert result.iloc[0]["total_points"] == 11
+        assert result.iloc[0]["minutes"] == 160
+        assert result.iloc[0]["transfers_in"] == 140
+        assert result.iloc[0]["selected"] == 5100
+        assert result.iloc[0]["fixture_count"] == 2
+
+    def test_aggregation_preserves_existing_fixture_count(self):
+        """Aggregation is idempotent after double-gameweek rows collapse."""
+        gw_df = self._make_gw_df(
+            {
+                "element": [100, 100],
+                "total_points": [5, 6],
+                "minutes": [70, 90],
+            }
+        )
+
+        result = aggregate_gameweek_rows(aggregate_gameweek_rows(gw_df))
+
+        assert result.iloc[0]["fixture_count"] == 2
+        assert result.iloc[0]["total_points"] == 11
 
     def test_output_schema(self):
         """Output should contain all expected columns."""
@@ -264,7 +330,13 @@ class TestEngineerHistoricalFeatures:
         result = engineer_historical_features(gw_df, 4, {}, {5: 3})
 
         # Metadata columns + feature columns + target
-        metadata_cols = {"player_id", "player_name", "team_id", "gameweek"}
+        metadata_cols = {
+            "player_id",
+            "player_name",
+            "team_id",
+            "gameweek",
+            "chance_of_playing",
+        }
         expected_cols = metadata_cols | set(FEATURE_COLS) | {"actual_points"}
         assert set(result.columns) == expected_cols
 

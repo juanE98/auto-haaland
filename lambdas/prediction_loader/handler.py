@@ -122,6 +122,9 @@ def convert_to_dynamodb_item(row: pd.Series) -> dict[str, Any]:
             str(round(float(row["haul_probability"]), 1))
         )
 
+    if "rank_score" in row and pd.notna(row["rank_score"]):
+        item["rank_score"] = Decimal(str(round(float(row["rank_score"]), 2)))
+
     return item
 
 

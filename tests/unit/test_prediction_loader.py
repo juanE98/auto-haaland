@@ -190,6 +190,20 @@ class TestConvertToDynamoDBItem:
         item = convert_to_dynamodb_item(row)
         assert item["team_id"] == 10
 
+    def test_rank_score_included(self):
+        row = pd.Series(
+            {
+                "player_id": 350,
+                "gameweek": 20,
+                "predicted_points": 8.5,
+                "rank_score": 9.75,
+            }
+        )
+
+        item = convert_to_dynamodb_item(row)
+
+        assert item["rank_score"] == Decimal("9.75")
+
     def test_optional_season_included(self):
         """Test optional season is included when present."""
         row = pd.Series(

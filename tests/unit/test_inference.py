@@ -16,12 +16,10 @@ from moto import mock_aws
 from lambdas.inference.handler import (
     FEATURE_COLS,
     POSITION_MAP,
-    TEAM_DIVERSITY_MAX,
-    TEAM_DIVERSITY_PENALTY,
-    apply_team_diversification,
     handler,
     load_features_from_s3,
     load_model_from_s3,
+    load_model_metadata_from_s3,
     run_inference,
     save_predictions_to_s3,
     validate_features,
@@ -123,6 +121,33 @@ class TestLoadModelFromS3:
         with pytest.raises(FileNotFoundError, match="Model not found"):
             load_model_from_s3(s3, "test-bucket", "models/nonexistent.xgb")
 
+
+@pytest.mark.unit
+class TestLoadModelMetadata:
+    def test_loads_and_merges_metadata(self):
+        s3 = MagicMock()
+        s3.get_object.return_value = {
+            "Body": MagicMock(read=MagicMock(return_value=b'{"point_slope": 1.2}'))
+        }
+
+        result = load_model_metadata_from_s3(s3, "bucket", "metadata.json")
+
+        assert result["point_slope"] == 1.2
+        assert result["rank_haul_weight"] == 1.5
+
+    def test_missing_metadata_uses_safe_defaults(self):
+        from botocore.exceptions import ClientError
+
+        s3 = MagicMock()
+        s3.get_object.side_effect = ClientError(
+            {"Error": {"Code": "NoSuchKey", "Message": "missing"}}, "GetObject"
+        )
+
+        result = load_model_metadata_from_s3(s3, "bucket", "metadata.json")
+
+        assert result["point_slope"] == 1.0
+        assert result["haul_slope"] == 1.0
+
     def test_cached_model_returned(self):
         """Cached model should be returned without hitting S3."""
         import lambdas.inference.handler as handler_module
@@ -204,6 +229,7 @@ class TestRunInference:
             "season",
             "chance_of_playing",
             "haul_probability",
+            "rank_score",
         }
         assert set(result.columns) == expected_cols
 
@@ -238,6 +264,51 @@ class TestRunInference:
         model, _ = trained_model
         result = run_inference(model, inference_features_df, 20, "2024_25")
         assert result["predicted_points"].dtype in [np.float64, np.float32]
+
+    def test_haul_signal_affects_rank_not_expected_points(self, inference_features_df):
+        point_model = MagicMock()
+        point_model.predict.return_value = np.array([6.0, 5.0, 4.0])
+        haul_model = MagicMock()
+        haul_model.predict_proba.return_value = np.array(
+            [[0.2, 0.8], [0.8, 0.2], [0.5, 0.5]]
+        )
+
+        result = run_inference(
+            point_model,
+            inference_features_df,
+            20,
+            "2026_27",
+            haul_model=haul_model,
+        )
+
+        assert result["predicted_points"].tolist() == [6.0, 5.0, 4.0]
+        assert result["rank_score"].tolist() == [7.2, 5.3, 4.75]
+
+    def test_model_metadata_calibrates_points_and_rank(self, inference_features_df):
+        point_model = MagicMock()
+        point_model.predict.return_value = np.array([3.0, 2.0, 1.0])
+        haul_model = MagicMock()
+        haul_model.predict_proba.return_value = np.array(
+            [[0.5, 0.5], [0.5, 0.5], [0.5, 0.5]]
+        )
+
+        result = run_inference(
+            point_model,
+            inference_features_df,
+            1,
+            "2026_27",
+            haul_model=haul_model,
+            model_metadata={
+                "point_slope": 2.0,
+                "point_intercept": 1.0,
+                "haul_slope": 1.0,
+                "haul_intercept": 0.0,
+                "rank_haul_weight": 2.0,
+            },
+        )
+
+        assert result["predicted_points"].tolist() == [7.0, 5.0, 3.0]
+        assert result["rank_score"].tolist() == [8.0, 6.0, 4.0]
 
 
 # === Predictions Saving ===
@@ -354,67 +425,3 @@ class TestHandler:
                     {"gameweek": 20, "season": "2024_25"},
                     None,
                 )
-
-
-# === Team Diversification ===
-
-
-@pytest.mark.unit
-class TestTeamDiversification:
-    def test_penalty_applied_beyond_cap(self):
-        """4th player gets 0.65^1, 5th gets 0.65^2 (progressive penalty)."""
-        df = pd.DataFrame(
-            {
-                "player_id": [1, 2, 3, 4, 5],
-                "team_id": [10, 10, 10, 10, 10],
-                "predicted_points": [5.0, 4.0, 3.0, 2.0, 1.0],
-            }
-        )
-        result = apply_team_diversification(df)
-
-        # Top 3 keep full score
-        assert result.loc[0, "predicted_points"] == 5.0
-        assert result.loc[1, "predicted_points"] == 4.0
-        assert result.loc[2, "predicted_points"] == 3.0
-        # 4th: 0.65^1, 5th: 0.65^2 (progressive)
-        assert result.loc[3, "predicted_points"] == pytest.approx(
-            round(2.0 * TEAM_DIVERSITY_PENALTY**1, 2)
-        )
-        assert result.loc[4, "predicted_points"] == pytest.approx(
-            round(1.0 * TEAM_DIVERSITY_PENALTY**2, 2)
-        )
-
-    def test_no_penalty_for_small_teams(self):
-        """Teams with <= 3 players should keep full scores."""
-        df = pd.DataFrame(
-            {
-                "player_id": [1, 2, 3],
-                "team_id": [10, 10, 10],
-                "predicted_points": [5.0, 4.0, 3.0],
-            }
-        )
-        result = apply_team_diversification(df)
-
-        assert result["predicted_points"].tolist() == [5.0, 4.0, 3.0]
-
-    def test_diversification_across_multiple_teams(self):
-        """Progressive penalty is applied independently per team."""
-        df = pd.DataFrame(
-            {
-                "player_id": [1, 2, 3, 4, 5, 6, 7, 8],
-                "team_id": [10, 10, 10, 10, 20, 20, 20, 20],
-                "predicted_points": [5.0, 4.0, 3.0, 2.0, 6.0, 5.0, 4.0, 3.0],
-            }
-        )
-        result = apply_team_diversification(df)
-
-        # Team 10: 4th player gets 0.65^1
-        assert result.loc[0, "predicted_points"] == 5.0
-        assert result.loc[3, "predicted_points"] == pytest.approx(
-            round(2.0 * TEAM_DIVERSITY_PENALTY**1, 2)
-        )
-        # Team 20: 4th player gets 0.65^1
-        assert result.loc[4, "predicted_points"] == 6.0
-        assert result.loc[7, "predicted_points"] == pytest.approx(
-            round(3.0 * TEAM_DIVERSITY_PENALTY**1, 2)
-        )

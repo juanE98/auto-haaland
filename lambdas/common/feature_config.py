@@ -12,18 +12,12 @@ and bump FEATURE_VERSION to ensure consistency across the pipeline.
 import math
 from typing import Any
 
-from common.feature_categories.fixture_features import FIXTURE_FEATURES
-from common.feature_categories.interaction_features import INTERACTION_FEATURES
-from common.feature_categories.opponent_features import OPPONENT_FEATURES
-from common.feature_categories.position_features import POSITION_FEATURES
-from common.feature_categories.team_features import TEAM_FEATURES
-
 # Feature version for tracking compatibility between components
-FEATURE_VERSION = "2.6.1"
+FEATURE_VERSION = "3.2.0"
 
 # Rolling stat definitions: each entry maps a stat name to the history field
 # it is derived from, plus which rolling windows to compute.
-# Total: 73 rolling features (36 original + 37 new in Phase 1)
+# Total: 82 rolling features
 ROLLING_STATS: list[dict[str, Any]] = [
     # === Core stats with standard windows (1, 3, 5) ===
     {"stat": "points", "field": "total_points", "windows": [1, 3, 5]},
@@ -67,6 +61,19 @@ ROLLING_STATS: list[dict[str, Any]] = [
     # === New minutes/starts stats with standard windows (1, 3, 5) ===
     {"stat": "minutes", "field": "minutes", "windows": [1, 3, 5]},
     {"stat": "starts", "field": "starts", "windows": [1, 3, 5]},
+    # === 2026/27 defensive contribution scoring ===
+    {
+        "stat": "defensive_contribution",
+        "field": "defensive_contribution",
+        "windows": [1, 3, 5],
+    },
+    {
+        "stat": "clearances_blocks_interceptions",
+        "field": "clearances_blocks_interceptions",
+        "windows": [3, 5],
+    },
+    {"stat": "tackles", "field": "tackles", "windows": [3, 5]},
+    {"stat": "recoveries", "field": "recoveries", "windows": [3, 5]},
     # === Stats with medium/long windows (3, 5) ===
     {"stat": "yellow_cards", "field": "yellow_cards", "windows": [3, 5]},
     {"stat": "saves", "field": "saves", "windows": [3, 5]},
@@ -115,11 +122,10 @@ STATIC_FEATURES = [
 ]
 
 # Bootstrap features extracted directly from FPL API player data (Phase 2)
-# Total: 32 new features
+# Total: 30 features. FPL's ep_this/ep_next predictions are deliberately
+# excluded so model evaluation measures this project's signal.
 BOOTSTRAP_FEATURES = [
-    # FPL Expected Points & Value (8)
-    "ep_this",  # Expected points this gameweek
-    "ep_next",  # Expected points next gameweek
+    # FPL Value (6)
     "points_per_game",  # FPL's PPG calculation
     "value_form",  # Points per million (form)
     "value_season",  # Points per million (season)
@@ -191,19 +197,24 @@ def _generate_rolling_names() -> list[str]:
 
 ROLLING_FEATURE_NAMES = _generate_rolling_names()
 
-# The canonical list of feature columns used for training and inference.
-# Total: 73 rolling + 9 static + 32 bootstrap + 35 team + 24 opponent
-#        + 16 fixture + 8 position + 5 interaction + 5 derived
-#      = 207 features
+# The canonical model contract contains only signals reproducible in both the
+# free historical data and live inference data. Availability remains response
+# metadata, while the two reproducible fixture fields cover double gameweeks.
+# Total: 82 rolling + 5 static + 2 fixture + 5 derived = 94 features.
 FEATURE_COLS = (
     ROLLING_FEATURE_NAMES
-    + STATIC_FEATURES
-    + BOOTSTRAP_FEATURES
-    + TEAM_FEATURES
-    + OPPONENT_FEATURES
-    + FIXTURE_FEATURES
-    + POSITION_FEATURES
-    + INTERACTION_FEATURES
+    + [
+        feature
+        for feature in STATIC_FEATURES
+        if feature
+        not in {
+            "chance_of_playing",
+            "opponent_attack_strength",
+            "opponent_defence_strength",
+            "selected_by_percent",
+        }
+    ]
+    + ["is_double_gameweek", "dgw_fixture_count"]
     + DERIVED_FEATURES
 )
 
@@ -303,7 +314,7 @@ def extract_values(
 
 def compute_rolling_features(history: list[dict[str, Any]]) -> dict[str, float]:
     """
-    Compute all 73 rolling features from a player's gameweek history.
+    Compute all rolling features from a player's gameweek history.
 
     Args:
         history: List of gameweek data dicts (most recent last).
@@ -400,7 +411,7 @@ def compute_bootstrap_features(
     prev_ownership: float | None = None,
 ) -> dict[str, float]:
     """
-    Compute the 32 bootstrap features from FPL API player data.
+    Compute bootstrap features from FPL API player data.
 
     Args:
         player: Single player element from FPL bootstrap-static API response
@@ -412,9 +423,7 @@ def compute_bootstrap_features(
     """
     result: dict[str, float] = {}
 
-    # --- FPL Expected Points & Value (8) ---
-    result["ep_this"] = float(player.get("ep_this") or 0)
-    result["ep_next"] = float(player.get("ep_next") or 0)
+    # --- FPL Value (6) ---
     result["points_per_game"] = float(player.get("points_per_game") or 0)
     result["value_form"] = float(player.get("value_form") or 0)
     result["value_season"] = float(player.get("value_season") or 0)

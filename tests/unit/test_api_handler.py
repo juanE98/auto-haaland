@@ -336,6 +336,42 @@ class TestGetTopPredictionsEndpoint:
         body = json.loads(response["body"])
         assert body["limit"] == 10
 
+    @patch("lambdas.api_handler.handler.get_table")
+    def test_rank_sort_uses_rank_index(self, mock_get_table, mock_context):
+        mock_table = MagicMock()
+        mock_table.query.return_value = {"Items": []}
+        mock_get_table.return_value = mock_table
+
+        event = make_api_event(
+            path="/top", query_params={"gameweek": "20", "sort_by": "rank"}
+        )
+        response = handler(event, mock_context)
+
+        assert response["statusCode"] == 200
+        assert mock_table.query.call_args.kwargs["IndexName"] == "gameweek-rank-index"
+
+    @patch("lambdas.api_handler.handler.get_table")
+    def test_legacy_haul_sort_uses_points_index_and_sorts(
+        self, mock_get_table, mock_context
+    ):
+        mock_table = MagicMock()
+        mock_table.query.return_value = {
+            "Items": [
+                {"player_id": 1, "haul_probability": Decimal("10")},
+                {"player_id": 2, "haul_probability": Decimal("80")},
+            ]
+        }
+        mock_get_table.return_value = mock_table
+
+        event = make_api_event(
+            path="/top", query_params={"gameweek": "20", "sort_by": "haul"}
+        )
+        response = handler(event, mock_context)
+
+        body = json.loads(response["body"])
+        assert mock_table.query.call_args.kwargs["IndexName"] == "gameweek-points-index"
+        assert body["predictions"][0]["player_id"] == 2
+
 
 class TestComparePlayersEndpoint:
     """Tests for GET /compare endpoint."""

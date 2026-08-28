@@ -1,7 +1,8 @@
-.PHONY: setup install test test-unit test-integration local-up local-down local-api local-logs clean help import-historical backfill train-local train-and-upload tune top haul player compare predictions run-pipeline lint format deploy-prod
+.PHONY: setup install test test-unit test-integration local-up local-down local-api local-logs clean help import-historical backfill archive-predictions train-local train-and-upload tune top haul player compare predictions run-pipeline lint format deploy-prod
 
 # Environment: dev (default) or prod
 ENV ?= dev
+ARCHIVE_SEASON ?= 2025_26
 
 # Helper for comma in $(if ...) expansions
 comma := ,
@@ -32,6 +33,7 @@ help:
 	@echo "Data & Training:"
 	@echo "  make import-historical - Import historical data from GitHub"
 	@echo "  make backfill          - Backfill current season from FPL API"
+	@echo "  make archive-predictions - Archive DynamoDB to S3 without deleting"
 	@echo "  make train-local       - Train XGBoost model locally (temporal split)"
 	@echo "  make train-and-upload  - Train locally and upload model to S3"
 	@echo "  make tune              - Tune hyperparameters with Optuna"
@@ -76,8 +78,7 @@ test-unit:
 test-integration: local-up
 	@echo "Running integration tests..."
 	sleep 5  # Wait for LocalStack to be ready
-	venv/bin/pytest tests/integration -v
-	$(MAKE) local-down
+	AWS_ENDPOINT_URL=http://localhost:4566 AWS_DEFAULT_REGION=ap-southeast-2 AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test venv/bin/pytest tests/integration -v; test_status=$$?; $(MAKE) local-down; exit $$test_status
 
 local-up:
 	@echo "Starting LocalStack..."
@@ -100,11 +101,14 @@ local-api:
 
 import-historical:
 	@echo "Importing historical data..."
-	venv/bin/python scripts/import_historical.py --seasons 2021-22,2022-23,2023-24 --output-dir data/historical/
+	venv/bin/python scripts/import_historical.py --seasons 2021-22,2022-23,2023-24,2024-25,2025-26 --output-dir data/historical/
 
 backfill:
 	@echo "Backfilling current season data..."
 	venv/bin/python scripts/backfill_current_season.py --output-dir data/current/ $(if $(END_GW),--end-gw $(END_GW),)
+
+archive-predictions:
+	venv/bin/python scripts/reset_predictions.py --table fpl-predictions-$(ENV) --bucket fpl-ml-data-$(ENV) --season $(ARCHIVE_SEASON)
 
 train-local:
 	@echo "Training models locally (temporal split)..."

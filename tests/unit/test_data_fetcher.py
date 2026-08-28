@@ -42,6 +42,7 @@ class TestDataFetcherHandler:
         assert result["season"] == "2024_25"
         assert result["files_count"] == 2  # bootstrap + fixtures
         assert len(result["files_saved"]) == 2
+        mock_fpl.get_fixtures.assert_called_once_with()
 
         # Verify S3 calls
         assert mock_s3.put_object.call_count == 2
