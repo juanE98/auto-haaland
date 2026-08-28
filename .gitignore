@@ -5,6 +5,11 @@ AGENTS.md
 .agents/
 .codex/
 
+# Markdown documentation (README files remain public)
+*.[mM][dD]
+!README.[mM][dD]
+!**/README.[mM][dD]
+
 # Python
 __pycache__/
 *.py[cod]
@@ -100,9 +105,6 @@ models/model_metadata.json
 data/
 *.parquet
 *.csv
-
-# Documentation (internal only)
-implementation-plan.md
 
 # Local AWS setup scripts (contain account ID)
 scripts/aws-oidc-setup.sh

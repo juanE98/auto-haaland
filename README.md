@@ -96,8 +96,6 @@ make clean                      # Remove build artifacts and caches
 
 ![AWS Architecture Diagram](./aws-architecture-diagram.png)
 
-See [fpl-ml-aws-architecture.md](./fpl-ml-aws-architecture.md) for details.
-
 ## Project Structure
 
 ```
