@@ -79,6 +79,8 @@ logs/
 
 # Environment variables and local credentials
 .env*
+*.env
+*.env.*
 .aws/
 .secrets/
 secrets/
