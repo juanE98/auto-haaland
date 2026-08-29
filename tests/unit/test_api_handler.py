@@ -538,6 +538,10 @@ class TestGetLatestGameweek:
         assert response["statusCode"] == 200
         body = json.loads(response["body"])
         assert body["gameweek"] == 22
+        assert all(
+            call.kwargs["IndexName"] == "gameweek-rank-index"
+            for call in mock_table.query.call_args_list
+        )
 
     @patch("lambdas.api_handler.handler.get_table")
     def test_no_predictions_returns_404(self, mock_get_table, mock_context):

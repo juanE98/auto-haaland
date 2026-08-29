@@ -101,7 +101,7 @@ def get_latest_gameweek():
     # Query the GSI from gameweek 38 down to 1; return the first with predictions.
     for gw in range(38, 0, -1):
         response = table.query(
-            IndexName="gameweek-points-index",
+            IndexName="gameweek-rank-index",
             KeyConditionExpression=Key("gameweek").eq(gw),
             Limit=1,
             ProjectionExpression="gameweek",

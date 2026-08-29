@@ -265,9 +265,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
     # Build predictions key if not provided
     if not predictions_key:
-        predictions_key = (
-            f"predictions/season_{season}/gw{gameweek}_predictions.json"
-        )
+        predictions_key = f"predictions/season_{season}/gw{gameweek}_predictions.json"
 
     try:
         # Initialise clients
