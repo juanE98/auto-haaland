@@ -2,7 +2,7 @@
 Inference Lambda Handler
 
 Loads a trained XGBoost model from S3, runs predictions on feature data,
-and saves prediction results as Parquet to S3 for the prediction loader.
+and saves prediction results as JSON to S3 for the prediction loader.
 """
 
 import io
@@ -180,7 +180,7 @@ def load_features_from_s3(
     features_key: str,
 ) -> pd.DataFrame:
     """
-    Load feature Parquet file from S3.
+    Load feature JSON file from S3.
 
     Args:
         s3_client: boto3 S3 client
@@ -196,7 +196,7 @@ def load_features_from_s3(
     try:
         logger.info(f"Loading features from s3://{bucket}/{features_key}")
         response = s3_client.get_object(Bucket=bucket, Key=features_key)
-        df = pd.read_parquet(io.BytesIO(response["Body"].read()))
+        df = pd.read_json(io.BytesIO(response["Body"].read()), orient="records")
         logger.info(f"Loaded {len(df)} rows with columns: {list(df.columns)}")
         return df
     except ClientError as e:
@@ -309,7 +309,7 @@ def save_predictions_to_s3(
     predictions_key: str,
 ) -> str:
     """
-    Save predictions DataFrame to S3 as Parquet.
+    Save predictions DataFrame to S3 as JSON.
 
     Args:
         s3_client: boto3 S3 client
@@ -320,16 +320,12 @@ def save_predictions_to_s3(
     Returns:
         S3 key where predictions were saved
     """
-    buffer = io.BytesIO()
-    predictions_df.to_parquet(buffer, engine="pyarrow", index=False)
-    buffer.seek(0)
-
     logger.info(f"Saving predictions to s3://{bucket}/{predictions_key}")
     s3_client.put_object(
         Bucket=bucket,
         Key=predictions_key,
-        Body=buffer.getvalue(),
-        ContentType="application/octet-stream",
+        Body=predictions_df.to_json(orient="records"),
+        ContentType="application/json",
     )
 
     logger.info(f"Saved {len(predictions_df)} predictions to {predictions_key}")
@@ -344,14 +340,14 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     {
         "gameweek": 20,
         "season": "2024_25",
-        "features_file": "processed/season_2024_25/gw20_features_prediction.parquet"
+        "features_file": "processed/season_2024_25/gw20_features_prediction.json"
     }
 
     Returns:
     {
         "gameweek": 20,
         "season": "2024_25",
-        "predictions_key": "predictions/season_2024_25/gw20_predictions.parquet",
+        "predictions_key": "predictions/season_2024_25/gw20_predictions.json",
         "predictions_count": 450,
         "model_key": "models/model.xgb",
         "timestamp": "2024-01-05T10:00:00+00:00"
@@ -376,11 +372,11 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     if not features_file:
         # Default features key from feature processor
         features_file = (
-            f"processed/season_{season}/gw{gameweek}_features_prediction.parquet"
+            f"processed/season_{season}/gw{gameweek}_features_prediction.json"
         )
 
     # Build predictions output key
-    predictions_key = f"predictions/season_{season}/gw{gameweek}_predictions.parquet"
+    predictions_key = f"predictions/season_{season}/gw{gameweek}_predictions.json"
 
     # Initialise S3 client
     s3_client = get_s3_client(endpoint_url=AWS_ENDPOINT_URL)
@@ -426,7 +422,7 @@ if __name__ == "__main__":
     test_event = {
         "gameweek": 20,
         "season": "2024_25",
-        "features_file": "processed/season_2024_25/gw20_features_prediction.parquet",
+        "features_file": "processed/season_2024_25/gw20_features_prediction.json",
     }
 
     os.environ["AWS_ENDPOINT_URL"] = "http://localhost:4566"

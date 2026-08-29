@@ -104,7 +104,7 @@ auto-haaland/
 ├── lambdas/
 │   ├── common/              # Shared: FPL API client, AWS utilities, feature config
 │   ├── data_fetcher/        # Fetches bootstrap, fixtures, player histories to S3
-│   ├── feature_processor/   # Feature engineering from raw data to Parquet
+│   ├── feature_processor/   # Feature engineering from raw data to JSON
 │   ├── inference/           # Loads XGBoost model, runs predictions
 │   ├── prediction_loader/   # Batch writes predictions to DynamoDB
 │   └── api_handler/         # REST API (top, player, compare, predictions)

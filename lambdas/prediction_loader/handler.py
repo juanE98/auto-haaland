@@ -1,7 +1,7 @@
 """
 Prediction Loader Lambda Handler
 
-Reads prediction Parquet files from S3 and batch writes them to DynamoDB.
+Reads prediction JSON files from S3 and batch writes them to DynamoDB.
 This enables fast queries by gameweek, position, and predicted points.
 """
 
@@ -44,7 +44,7 @@ def load_predictions_from_s3(
     key: str,
 ) -> pd.DataFrame:
     """
-    Load predictions Parquet file from S3.
+    Load predictions JSON file from S3.
 
     Args:
         s3_client: boto3 S3 client
@@ -57,7 +57,7 @@ def load_predictions_from_s3(
     logger.info(f"Loading predictions from s3://{bucket}/{key}")
 
     response = s3_client.get_object(Bucket=bucket, Key=key)
-    df = pd.read_parquet(io.BytesIO(response["Body"].read()))
+    df = pd.read_json(io.BytesIO(response["Body"].read()), orient="records")
 
     logger.info(f"Loaded {len(df)} predictions from S3")
     return df
@@ -236,7 +236,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     {
         "gameweek": 20,
         "season": "2024_25",
-        "predictions_key": "predictions/season_2024_25/gw20_predictions.parquet",  # Optional
+        "predictions_key": "predictions/season_2024_25/gw20_predictions.json",  # Optional
         "replace_existing": true  # Optional: delete existing predictions first
     }
 
@@ -266,7 +266,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     # Build predictions key if not provided
     if not predictions_key:
         predictions_key = (
-            f"predictions/season_{season}/gw{gameweek}_predictions.parquet"
+            f"predictions/season_{season}/gw{gameweek}_predictions.json"
         )
 
     try:

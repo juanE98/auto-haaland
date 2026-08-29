@@ -3,8 +3,10 @@ Unit tests for feature_processor Lambda handler.
 """
 
 import json
+from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
+import pandas as pd
 import pytest
 
 from lambdas.common.feature_config import (
@@ -18,7 +20,29 @@ from lambdas.feature_processor.handler import (
     get_team_strength,
     handler,
     load_player_histories_from_s3,
+    save_features_to_s3,
 )
+
+
+def test_zip_lambda_requirements_do_not_include_pyarrow():
+    requirements = (
+        Path(__file__).parents[2] / "lambdas" / "requirements.txt"
+    ).read_text()
+    assert "pyarrow==" not in requirements
+
+
+def test_save_features_as_json():
+    s3_client = MagicMock()
+    source = pd.DataFrame({"player_id": [1], "form_score": [2.5]})
+
+    key = save_features_to_s3(
+        s3_client, source, "test-bucket", 1, "2026_27", "prediction"
+    )
+
+    assert key == "processed/season_2026_27/gw1_features_prediction.json"
+    body = s3_client.put_object.call_args.kwargs["Body"]
+    assert json.loads(body) == [{"player_id": 1, "form_score": 2.5}]
+    assert s3_client.put_object.call_args.kwargs["ContentType"] == "application/json"
 
 
 class TestCalculateRollingAverage:
@@ -576,9 +600,7 @@ class TestFeatureProcessorHandler:
         }
         mock_load_fixtures.return_value = [{"team_h": 1, "team_a": 2}]
         mock_load_histories.return_value = {}
-        mock_save.return_value = (
-            "processed/season_2024_25/gw20_features_training.parquet"
-        )
+        mock_save.return_value = "processed/season_2024_25/gw20_features_training.json"
 
         event = {"gameweek": 20, "season": "2024_25", "mode": "historical"}
 

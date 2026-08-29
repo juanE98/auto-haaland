@@ -191,14 +191,10 @@ class TestEndToEndHandler:
     ):
         """Test complete load pipeline with S3 and DynamoDB."""
         # Upload predictions to S3
-        buffer = io.BytesIO()
-        predictions_dataframe.to_parquet(buffer, engine="pyarrow", index=False)
-        buffer.seek(0)
-
         localstack_s3_client.put_object(
             Bucket=clean_s3_bucket,
-            Key="predictions/season_2024_25/gw20_predictions.parquet",
-            Body=buffer.getvalue(),
+            Key="predictions/season_2024_25/gw20_predictions.json",
+            Body=predictions_dataframe.to_json(orient="records"),
         )
 
         # Call handler

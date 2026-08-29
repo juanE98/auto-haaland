@@ -308,8 +308,8 @@ class TestBatchWritePredictions:
 class TestLoadPredictionsFromS3:
     """Tests for load_predictions_from_s3 function."""
 
-    def test_loads_parquet_from_s3(self):
-        """Test loading Parquet file from S3."""
+    def test_loads_json_from_s3(self):
+        """Test loading JSON file from S3."""
         # Create sample predictions DataFrame
         df = pd.DataFrame(
             {
@@ -320,15 +320,13 @@ class TestLoadPredictionsFromS3:
         )
 
         # Mock S3 response
-        buffer = io.BytesIO()
-        df.to_parquet(buffer, engine="pyarrow", index=False)
-        buffer.seek(0)
-
         mock_s3 = MagicMock()
-        mock_s3.get_object.return_value = {"Body": io.BytesIO(buffer.getvalue())}
+        mock_s3.get_object.return_value = {
+            "Body": io.BytesIO(df.to_json(orient="records").encode("utf-8"))
+        }
 
         result = load_predictions_from_s3(
-            mock_s3, "fpl-ml-data", "predictions/gw20.parquet"
+            mock_s3, "fpl-ml-data", "predictions/gw20.json"
         )
 
         assert len(result) == 2
@@ -556,5 +554,5 @@ class TestHandler:
 
         result = handler(event, None)
 
-        expected_key = "predictions/season_2024_25/gw20_predictions.parquet"
+        expected_key = "predictions/season_2024_25/gw20_predictions.json"
         assert result["predictions_key"] == expected_key

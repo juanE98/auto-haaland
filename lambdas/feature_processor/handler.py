@@ -1,11 +1,10 @@
 """
 Feature Processor Lambda Handler
 
-Reads raw FPL data from S3, engineers ML features, and outputs Parquet files
+Reads raw FPL data from S3, engineers ML features, and outputs JSON files
 for model training and predictions.
 """
 
-import io
 import json
 import logging
 import os
@@ -460,26 +459,21 @@ def save_features_to_s3(
     s3_client, df: pd.DataFrame, bucket: str, gameweek: int, season: str, mode: str
 ) -> str:
     """
-    Save features DataFrame to S3 as Parquet.
+    Save features DataFrame to S3 as JSON.
 
     Returns:
         S3 key where the file was saved
     """
     suffix = "training" if mode == "historical" else "prediction"
-    key = f"processed/season_{season}/gw{gameweek}_features_{suffix}.parquet"
+    key = f"processed/season_{season}/gw{gameweek}_features_{suffix}.json"
 
     logger.info(f"Saving features to s3://{bucket}/{key}")
-
-    # Write to buffer
-    buffer = io.BytesIO()
-    df.to_parquet(buffer, engine="pyarrow", index=False)
-    buffer.seek(0)
 
     s3_client.put_object(
         Bucket=bucket,
         Key=key,
-        Body=buffer.getvalue(),
-        ContentType="application/octet-stream",
+        Body=df.to_json(orient="records"),
+        ContentType="application/json",
     )
 
     logger.info(f"Successfully saved {len(df)} rows to {key}")
@@ -503,7 +497,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         "gameweek": 20,
         "season": "2024_25",
         "mode": "historical",
-        "features_file": "processed/season_2024_25/gw20_features_training.parquet",
+        "features_file": "processed/season_2024_25/gw20_features_training.json",
         "rows_processed": 450,
         "timestamp": "2024-01-05T10:00:00Z"
     }

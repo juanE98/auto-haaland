@@ -171,7 +171,7 @@ class TestLoadModelMetadata:
 class TestLoadFeaturesFromS3:
     @mock_aws
     def test_load_features_success(self, inference_features_df):
-        """Features should load correctly from S3 Parquet."""
+        """Features should load correctly from S3 JSON."""
         import boto3
 
         s3 = boto3.client("s3", region_name="ap-southeast-2")
@@ -180,17 +180,13 @@ class TestLoadFeaturesFromS3:
             CreateBucketConfiguration={"LocationConstraint": "ap-southeast-2"},
         )
 
-        # Upload features as Parquet
-        buffer = io.BytesIO()
-        inference_features_df.to_parquet(buffer, engine="pyarrow", index=False)
-        buffer.seek(0)
         s3.put_object(
             Bucket="test-bucket",
-            Key="features.parquet",
-            Body=buffer.getvalue(),
+            Key="features.json",
+            Body=inference_features_df.to_json(orient="records"),
         )
 
-        result = load_features_from_s3(s3, "test-bucket", "features.parquet")
+        result = load_features_from_s3(s3, "test-bucket", "features.json")
         assert len(result) == 3
         assert "player_id" in result.columns
 
@@ -206,7 +202,7 @@ class TestLoadFeaturesFromS3:
         )
 
         with pytest.raises(FileNotFoundError, match="Features not found"):
-            load_features_from_s3(s3, "test-bucket", "missing.parquet")
+            load_features_from_s3(s3, "test-bucket", "missing.json")
 
 
 # === Inference ===
@@ -318,7 +314,7 @@ class TestRunInference:
 class TestSavePredictionsToS3:
     @mock_aws
     def test_save_and_verify(self, trained_model, inference_features_df):
-        """Predictions should be saved to S3 as Parquet."""
+        """Predictions should be saved to S3 as JSON."""
         import boto3
 
         model, _ = trained_model
@@ -331,13 +327,13 @@ class TestSavePredictionsToS3:
         )
 
         key = save_predictions_to_s3(
-            s3, predictions_df, "test-bucket", "predictions/test.parquet"
+            s3, predictions_df, "test-bucket", "predictions/test.json"
         )
-        assert key == "predictions/test.parquet"
+        assert key == "predictions/test.json"
 
-        # Verify the file exists and is valid Parquet
+        # Verify the file exists and is valid JSON
         response = s3.get_object(Bucket="test-bucket", Key=key)
-        loaded = pd.read_parquet(io.BytesIO(response["Body"].read()))
+        loaded = pd.read_json(io.BytesIO(response["Body"].read()), orient="records")
         assert len(loaded) == 3
 
 
@@ -376,13 +372,10 @@ class TestHandler:
         s3.upload_file(model_path, "fpl-ml-data", "models/model.xgb")
 
         # Upload features
-        buffer = io.BytesIO()
-        inference_features_df.to_parquet(buffer, engine="pyarrow", index=False)
-        buffer.seek(0)
         s3.put_object(
             Bucket="fpl-ml-data",
-            Key="processed/season_2024_25/gw20_features_prediction.parquet",
-            Body=buffer.getvalue(),
+            Key="processed/season_2024_25/gw20_features_prediction.json",
+            Body=inference_features_df.to_json(orient="records"),
         )
 
         # Clear model cache

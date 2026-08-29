@@ -4,5 +4,4 @@
 boto3==1.43.38
 httpx==0.26.0
 pandas==2.2.0
-pyarrow==23.0.1
 aws-lambda-powertools==2.32.0

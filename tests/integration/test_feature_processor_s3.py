@@ -129,8 +129,8 @@ class TestFeatureProcessorS3Integration:
         assert len(result[350]) == 2
         assert result[350][0]["total_points"] == 8
 
-    def test_save_features_parquet_to_s3(self, localstack_s3_client, clean_s3_bucket):
-        """Test saving features DataFrame as Parquet to S3."""
+    def test_save_features_json_to_s3(self, localstack_s3_client, clean_s3_bucket):
+        """Test saving features DataFrame as JSON to S3."""
         s3_client = localstack_s3_client
         bucket = clean_s3_bucket
 
@@ -155,14 +155,14 @@ class TestFeatureProcessorS3Integration:
         )
 
         # Verify key format
-        assert key == "processed/season_2024_25/gw20_features_training.parquet"
+        assert key == "processed/season_2024_25/gw20_features_training.json"
 
         # Read back and verify
         response = s3_client.get_object(Bucket=bucket, Key=key)
 
-        # Parse Parquet
+        # Parse JSON
         buffer = io.BytesIO(response["Body"].read())
-        loaded_df = pd.read_parquet(buffer)
+        loaded_df = pd.read_json(buffer, orient="records")
 
         assert len(loaded_df) == 2
         assert list(loaded_df.columns) == [
@@ -189,7 +189,7 @@ class TestFeatureProcessorS3Integration:
             mode="prediction",
         )
 
-        assert key == "processed/season_2024_25/gw21_features_prediction.parquet"
+        assert key == "processed/season_2024_25/gw21_features_prediction.json"
 
         # Verify file exists
         response = s3_client.list_objects_v2(
@@ -335,12 +335,12 @@ class TestFeatureProcessorS3Integration:
 
         # Verify output file was created
         output_key = result["features_file"]
-        assert output_key == "processed/season_2024_25/gw20_features_training.parquet"
+        assert output_key == "processed/season_2024_25/gw20_features_training.json"
 
         # Read and verify output
         response = s3_client.get_object(Bucket=bucket, Key=output_key)
         buffer = io.BytesIO(response["Body"].read())
-        df = pd.read_parquet(buffer)
+        df = pd.read_json(buffer, orient="records")
 
         assert len(df) == 1
         assert df.iloc[0]["player_id"] == 350
@@ -426,7 +426,7 @@ class TestFeatureProcessorS3Integration:
 
         response = s3_client.get_object(Bucket=bucket, Key=output_key)
         buffer = io.BytesIO(response["Body"].read())
-        df = pd.read_parquet(buffer)
+        df = pd.read_json(buffer, orient="records")
 
         assert len(df) == 1
         assert df.iloc[0]["home_away"] == 0  # Away game
@@ -678,7 +678,7 @@ class TestFeatureProcessorS3Integration:
         output_key = result["features_file"]
         response = s3_client.get_object(Bucket=bucket, Key=output_key)
         buffer = io.BytesIO(response["Body"].read())
-        df = pd.read_parquet(buffer)
+        df = pd.read_json(buffer, orient="records")
 
         missing_features = set(FEATURE_COLS) - set(df.columns)
         assert len(missing_features) == 0, (
