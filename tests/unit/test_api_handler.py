@@ -408,6 +408,28 @@ class TestGetTopPredictionsEndpoint:
         assert mock_table.query.call_args.kwargs["IndexName"] == "gameweek-points-index"
         assert body["predictions"][0]["player_id"] == 2
 
+    @patch("lambdas.api_handler.handler.get_table")
+    def test_legacy_haul_sort_respects_position_filter(
+        self, mock_get_table, mock_context
+    ):
+        mock_table = MagicMock()
+        mock_table.query.return_value = {
+            "Items": [
+                {"player_id": 1, "position": "MID", "haul_probability": Decimal("80")},
+                {"player_id": 2, "position": "FWD", "haul_probability": Decimal("10")},
+            ]
+        }
+        mock_get_table.return_value = mock_table
+
+        event = make_api_event(
+            path="/top",
+            query_params={"gameweek": "20", "sort_by": "haul", "position": "FWD"},
+        )
+        response = handler(event, mock_context)
+
+        body = json.loads(response["body"])
+        assert [p["player_id"] for p in body["predictions"]] == [2]
+
 
 class TestComparePlayersEndpoint:
     """Tests for GET /compare endpoint."""
