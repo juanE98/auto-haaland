@@ -285,6 +285,8 @@ def get_top_predictions():
                 ExclusiveStartKey=response["LastEvaluatedKey"],
             )
             items.extend(response.get("Items", []))
+        if position:
+            items = [item for item in items if item.get("position") == position]
     elif position:
         # Position filter requires fetching from gameweek index and filtering
         response = table.query(
