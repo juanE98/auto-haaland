@@ -89,6 +89,7 @@ QUALITY_TRAIN_SEASONS = {"2021-22", "2022-23", "2023-24"}
 QUALITY_VALIDATION_SEASON = "2024-25"
 QUALITY_COMPLETED_TEST_SEASON = "2025-26"
 QUALITY_OUTER_TEST_SEASON = "2026-27"
+QUALITY_EARLY_GAMEWEEK = 3
 
 
 def split_quality_gate_seasons(
@@ -266,6 +267,60 @@ def apply_haul_calibration(probabilities, metadata: dict[str, float]):
     )
 
 
+def _predict_quality_frame(
+    regressor,
+    classifier,
+    frame: pd.DataFrame,
+    feature_cols: list[str],
+    metadata: dict[str, float],
+) -> pd.DataFrame:
+    """Return calibrated points, haul probability and rank for one frame."""
+    raw_points = regressor.predict(frame[feature_cols])
+    points = raw_points * metadata["point_slope"] + metadata["point_intercept"]
+    raw_haul = classifier.predict_proba(frame[feature_cols])[:, 1]
+    haul = apply_haul_calibration(raw_haul, metadata)
+    gameweeks = frame["gameweek"].to_numpy()
+    # Key rounds by season so pooled folds never merge two seasons' GW1
+    round_keys = (
+        (frame["season"].astype(str) + ":" + frame["gameweek"].astype(str)).to_numpy()
+        if "season" in frame.columns
+        else gameweeks
+    )
+    return pd.DataFrame(
+        {
+            "actual": frame[TARGET_COL].to_numpy(dtype=float),
+            "points": points,
+            "haul": haul,
+            "rank_score": inference_rank_scores(
+                points, haul, metadata["rank_haul_weight"]
+            ),
+            "position": frame["position"].to_numpy(),
+            "gameweek": gameweeks,
+            "round_key": round_keys,
+        }
+    )
+
+
+def _early_metrics(predicted: pd.DataFrame) -> dict[str, float]:
+    """Score the early-season rows of a predicted frame."""
+    early = predicted[predicted["gameweek"] <= QUALITY_EARLY_GAMEWEEK]
+    actual = early["actual"].to_numpy()
+    rank_scores = early["rank_score"].to_numpy()
+    rounds = early["round_key"].to_numpy()
+    positions = early["position"].to_numpy()
+    return {
+        "early_mae": float(mean_absolute_error(actual, early["points"])),
+        "early_ndcg_at_15": mean_gameweek_ndcg(actual, rank_scores, rounds),
+        "early_haul_recall_at_15": haul_recall_at_k(actual, rank_scores, rounds),
+        "early_fwd_haul_recall_at_15": haul_recall_at_k(
+            actual, rank_scores, rounds, cohort=positions == 4
+        ),
+        "early_fwd_haul_ndcg": mean_gameweek_forward_haul_ndcg(
+            actual, rank_scores, rounds, positions
+        ),
+    }
+
+
 def score_backtest_predictions(
     regressor,
     classifier,
@@ -274,50 +329,30 @@ def score_backtest_predictions(
     metadata: dict[str, float],
 ) -> dict[str, float]:
     """Score one out-of-time frame with point, haul, and ranking metrics."""
-    raw_points = regressor.predict(frame[feature_cols])
-    points = raw_points * metadata["point_slope"] + metadata["point_intercept"]
-    raw_haul = classifier.predict_proba(frame[feature_cols])[:, 1]
-    haul = apply_haul_calibration(raw_haul, metadata)
-    rank_scores = inference_rank_scores(points, haul, metadata["rank_haul_weight"])
-    actual = frame[TARGET_COL].to_numpy(dtype=float)
-    gameweeks = frame["gameweek"].to_numpy()
-    positions = frame["position"].to_numpy()
+    predicted = _predict_quality_frame(
+        regressor, classifier, frame, feature_cols, metadata
+    )
+    actual = predicted["actual"].to_numpy()
+    rank_scores = predicted["rank_score"].to_numpy()
+    rounds = predicted["round_key"].to_numpy()
     haul_outcomes = (actual >= HAUL_THRESHOLD).astype(int)
-    early = gameweeks <= 3
 
     return {
-        "mae": float(mean_absolute_error(actual, points)),
-        "brier_score": float(brier_score_loss(haul_outcomes, haul)),
-        "ndcg_at_15": mean_gameweek_ndcg(actual, rank_scores, gameweeks),
-        "haul_recall_at_15": haul_recall_at_k(actual, rank_scores, gameweeks),
-        "early_mae": float(mean_absolute_error(actual[early], points[early])),
-        "early_ndcg_at_15": mean_gameweek_ndcg(
-            actual[early], rank_scores[early], gameweeks[early]
-        ),
-        "early_haul_recall_at_15": haul_recall_at_k(
-            actual[early], rank_scores[early], gameweeks[early]
-        ),
-        "early_fwd_haul_recall_at_15": haul_recall_at_k(
-            actual[early],
-            rank_scores[early],
-            gameweeks[early],
-            cohort=positions[early] == 4,
-        ),
-        "early_fwd_haul_ndcg": mean_gameweek_forward_haul_ndcg(
-            actual[early], rank_scores[early], gameweeks[early], positions[early]
-        ),
+        "mae": float(mean_absolute_error(actual, predicted["points"])),
+        "brier_score": float(brier_score_loss(haul_outcomes, predicted["haul"])),
+        "ndcg_at_15": mean_gameweek_ndcg(actual, rank_scores, rounds),
+        "haul_recall_at_15": haul_recall_at_k(actual, rank_scores, rounds),
+        **_early_metrics(predicted),
     }
 
 
-def _train_quality_candidate(
+def _fit_quality_models(
     train: pd.DataFrame,
     validation: pd.DataFrame,
-    completed_test: pd.DataFrame,
-    outer_test: pd.DataFrame,
     feature_cols: list[str],
     hyperparams: dict | None = None,
-) -> tuple[dict[str, float], dict[str, float]]:
-    """Train, calibrate, and score one out-of-time model candidate."""
+) -> tuple[xgb.XGBRegressor, xgb.XGBClassifier, dict[str, float]]:
+    """Train and calibrate one regressor and haul classifier pair."""
     regression_params = {**DEFAULT_HYPERPARAMS, **(hyperparams or {})}
     regression_params["early_stopping_rounds"] = QUALITY_EARLY_STOPPING_ROUNDS
     classifier_params = HAUL_CLASSIFIER_HYPERPARAMS.copy()
@@ -373,30 +408,108 @@ def _train_quality_candidate(
         validation[TARGET_COL],
         validation["gameweek"],
     )
+    return regressor, classifier, metadata
+
+
+def _train_quality_candidate(
+    train: pd.DataFrame,
+    validation: pd.DataFrame,
+    completed_test: pd.DataFrame,
+    feature_cols: list[str],
+    hyperparams: dict | None = None,
+) -> tuple[dict[str, float], dict[str, float]]:
+    """Train, calibrate, and score one candidate on the fixed season split."""
+    regressor, classifier, metadata = _fit_quality_models(
+        train, validation, feature_cols, hyperparams
+    )
     metrics = score_backtest_predictions(
         regressor, classifier, completed_test, feature_cols, metadata
     )
-    outer_metrics = score_backtest_predictions(
-        regressor, classifier, outer_test, feature_cols, metadata
-    )
-    for key in (
-        "early_mae",
-        "early_ndcg_at_15",
-        "early_haul_recall_at_15",
-        "early_fwd_haul_recall_at_15",
-        "early_fwd_haul_ndcg",
-    ):
-        metrics[key] = outer_metrics[key]
     return metrics, metadata
+
+
+def early_season_folds(
+    df: pd.DataFrame,
+) -> list[tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]]:
+    """Build rolling-origin folds that test each season's opening gameweeks.
+
+    Each fold trains on every season before the last one preceding the test
+    season, early-stops and calibrates on that last season, and tests the
+    test season's first QUALITY_EARLY_GAMEWEEK gameweeks.
+    """
+    seasons = sorted(df["season"].unique())
+    folds = []
+    for index in range(2, len(seasons)):
+        test = df[
+            (df["season"] == seasons[index])
+            & (df["gameweek"] <= QUALITY_EARLY_GAMEWEEK)
+        ]
+        if test.empty:
+            continue
+        folds.append(
+            (
+                df[df["season"].isin(seasons[: index - 1])],
+                df[df["season"] == seasons[index - 1]],
+                test,
+            )
+        )
+    return folds
+
+
+def score_early_folds(
+    df: pd.DataFrame,
+    feature_cols: list[str],
+    hyperparams: dict | None = None,
+) -> tuple[dict[str, float], pd.DataFrame]:
+    """Pool early-season predictions across folds and score them together."""
+    predicted = []
+    for train, validation, test in early_season_folds(df):
+        regressor, classifier, metadata = _fit_quality_models(
+            train, validation, feature_cols, hyperparams
+        )
+        predicted.append(
+            _predict_quality_frame(regressor, classifier, test, feature_cols, metadata)
+        )
+    if not predicted:
+        raise ValueError("Quality gate requires at least one early-season fold")
+    pooled = pd.concat(predicted, ignore_index=True)
+    return _early_metrics(pooled), pooled
+
+
+def _round_ndcg(predicted: pd.DataFrame) -> pd.Series:
+    """Return NDCG@15 per round, skipping rounds with no positive relevance."""
+    values = {}
+    for round_key, group in predicted.groupby("round_key", sort=True):
+        if np.clip(group["actual"], 0, None).sum() == 0:
+            continue
+        values[round_key] = mean_gameweek_ndcg(
+            group["actual"], group["rank_score"], group["round_key"]
+        )
+    return pd.Series(values, dtype=float)
+
+
+def paired_ndcg_standard_error(
+    baseline: pd.DataFrame, candidate: pd.DataFrame
+) -> float | None:
+    """Return the standard error of the mean per-round NDCG difference."""
+    differences = (_round_ndcg(candidate) - _round_ndcg(baseline)).dropna()
+    if len(differences) < 2:
+        return None
+    return float(differences.std(ddof=1) / np.sqrt(len(differences)))
 
 
 def run_quality_gate(
     df: pd.DataFrame,
     hyperparams: dict | None = None,
 ) -> dict:
-    """Compare fresh v4 and v5 models on identical fixed-season splits."""
+    """Compare fresh v4 and v5 models on identical season splits.
+
+    Full-season metrics and release metadata come from the fixed split. The
+    early-season metrics pool the opening gameweeks of every season that has
+    at least two earlier seasons, so the gate does not decide on two rounds.
+    """
     validate_features(df)
-    train, validation, completed_test, outer_test = split_quality_gate_seasons(df)
+    train, validation, completed_test, _ = split_quality_gate_seasons(df)
     baseline_features = [
         feature for feature in FEATURE_COLS if feature not in MODEL_V5_FEATURES
     ]
@@ -404,7 +517,6 @@ def run_quality_gate(
         train,
         validation,
         completed_test,
-        outer_test,
         baseline_features,
         hyperparams,
     )
@@ -412,13 +524,22 @@ def run_quality_gate(
         train,
         validation,
         completed_test,
-        outer_test,
         FEATURE_COLS,
         hyperparams,
     )
+    baseline_early, baseline_pooled = score_early_folds(
+        df, baseline_features, hyperparams
+    )
+    candidate_early, candidate_pooled = score_early_folds(df, FEATURE_COLS, hyperparams)
+    baseline_metrics.update(baseline_early)
+    candidate_metrics.update(candidate_early)
     gate = evaluate_quality_gates(baseline_metrics, candidate_metrics)
     return {
         **gate,
+        "early_gameweeks": int(candidate_pooled["round_key"].nunique()),
+        "early_ndcg_diff_se": paired_ndcg_standard_error(
+            baseline_pooled, candidate_pooled
+        ),
         "baseline": baseline_metrics,
         "candidate": {**candidate_metrics, "metadata": metadata},
     }

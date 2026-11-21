@@ -516,6 +516,33 @@ class TestRankingMetrics:
         assert metrics["brier_score"] == pytest.approx(0.075)
 
 
+def quality_gate_frame():
+    """Return a minimal six-season frame with four gameweeks per season."""
+    rows = []
+    for season in [
+        "2021-22",
+        "2022-23",
+        "2023-24",
+        "2024-25",
+        "2025-26",
+        "2026-27",
+    ]:
+        for gameweek in range(1, 5):
+            for player_id, points in enumerate([0, 2, 10, 12], start=1):
+                row = {feature: 0.0 for feature in FEATURE_COLS}
+                row.update(
+                    {
+                        "season": season,
+                        "gameweek": gameweek,
+                        "player_id": player_id,
+                        "actual_points": points,
+                        "position": 4 if points >= 10 else 3,
+                    }
+                )
+                rows.append(row)
+    return pd.DataFrame(rows)
+
+
 class TestQualityGate:
     def test_quality_gate_uses_fresh_v4_baseline_with_identical_inputs(
         self, monkeypatch
@@ -526,7 +553,6 @@ class TestQualityGate:
             train,
             validation,
             completed_test,
-            outer_test,
             feature_cols,
             hyperparams,
         ):
@@ -535,7 +561,6 @@ class TestQualityGate:
                     train,
                     validation,
                     completed_test,
-                    outer_test,
                     feature_cols,
                     hyperparams,
                 )
@@ -552,6 +577,11 @@ class TestQualityGate:
             return metrics, {"rank_haul_weight": 1.5}
 
         monkeypatch.setattr(train_local, "_train_quality_candidate", train_candidate)
+        monkeypatch.setattr(
+            train_local,
+            "score_early_folds",
+            lambda *_: ({}, pd.DataFrame(columns=["round_key"])),
+        )
         frame = pd.DataFrame(
             {
                 **{feature: [0.0] * 10 for feature in FEATURE_COLS},
@@ -582,20 +612,17 @@ class TestQualityGate:
         assert baseline[0].equals(candidate[0])
         assert baseline[1].equals(candidate[1])
         assert baseline[2].equals(candidate[2])
-        assert baseline[3].equals(candidate[3])
         assert set(baseline[0]["season"]) == {"2021-22", "2022-23", "2023-24"}
         assert set(baseline[1]["season"]) == {"2024-25"}
         assert set(baseline[2]["season"]) == {"2025-26"}
-        assert set(baseline[3]["season"]) == {"2026-27"}
         assert set(baseline[1]["gameweek"]) == {1, 4}
         assert set(baseline[2]["gameweek"]) == {1, 4}
-        assert set(baseline[3]["gameweek"]) == {1, 2}
-        assert baseline[4] == [
+        assert baseline[3] == [
             feature for feature in FEATURE_COLS if feature not in MODEL_V5_FEATURES
         ]
-        assert len(baseline[4]) == 101
-        assert candidate[4] == FEATURE_COLS
-        assert baseline[5] == candidate[5] == hyperparams
+        assert len(baseline[3]) == 101
+        assert candidate[3] == FEATURE_COLS
+        assert baseline[4] == candidate[4] == hyperparams
 
     def test_quality_candidates_use_validation_for_early_stopping(self, monkeypatch):
         regressor_params = []
@@ -707,80 +734,114 @@ class TestQualityGate:
         with pytest.raises(ValueError, match="2021-22 through 2023-24"):
             train_local.split_quality_gate_seasons(frame)
 
-    def test_quality_candidate_uses_outer_early_and_completed_full_metrics(
-        self, monkeypatch
-    ):
-        def frame(season, gameweeks):
-            return pd.DataFrame(
-                {
-                    "now_cost": [1.0] * len(gameweeks),
-                    "actual_points": [0, 10][: len(gameweeks)],
-                    "gameweek": gameweeks,
-                    "position": [3, 4][: len(gameweeks)],
-                    "season": [season] * len(gameweeks),
-                }
+    def test_quality_gate_takes_early_metrics_from_pooled_folds(self, monkeypatch):
+        full_metrics = {
+            "mae": 1.0,
+            "brier_score": 0.01,
+            "ndcg_at_15": 0.3,
+            "haul_recall_at_15": 0.2,
+            "early_mae": 99.0,
+            "early_ndcg_at_15": 99.0,
+            "early_haul_recall_at_15": 99.0,
+            "early_fwd_haul_recall_at_15": 99.0,
+            "early_fwd_haul_ndcg": 99.0,
+        }
+        monkeypatch.setattr(
+            train_local,
+            "_train_quality_candidate",
+            lambda *_: (dict(full_metrics), {"rank_haul_weight": 1.0}),
+        )
+        pooled = pd.DataFrame(
+            {
+                "actual": [10.0, 0.0, 10.0, 0.0],
+                "rank_score": [2.0, 1.0, 1.0, 2.0],
+                "round_key": ["2024-25:1", "2024-25:1", "2025-26:1", "2025-26:1"],
+            }
+        )
+        early = {
+            "early_mae": 1.5,
+            "early_ndcg_at_15": 0.4,
+            "early_haul_recall_at_15": 0.3,
+            "early_fwd_haul_recall_at_15": 0.2,
+            "early_fwd_haul_ndcg": 0.1,
+        }
+        monkeypatch.setattr(
+            train_local, "score_early_folds", lambda *_: (dict(early), pooled)
+        )
+
+        result = train_local.run_quality_gate(quality_gate_frame())
+
+        assert result["candidate"]["mae"] == 1.0
+        assert result["candidate"]["early_ndcg_at_15"] == 0.4
+        assert result["baseline"]["early_mae"] == 1.5
+        assert result["early_gameweeks"] == 2
+        assert result["early_ndcg_diff_se"] == 0.0
+
+    def test_early_season_folds_roll_forward_without_leakage(self):
+        frame = quality_gate_frame()
+
+        folds = train_local.early_season_folds(frame)
+
+        assert [
+            (
+                sorted(train["season"].unique()),
+                sorted(validation["season"].unique()),
+                sorted(test["season"].unique()),
             )
-
-        regressor = MagicMock(best_iteration=0)
-        regressor.predict.return_value = np.array([0.0, 1.0])
-        classifier = MagicMock(best_iteration=0)
-        classifier.predict_proba.return_value = np.array([[0.9, 0.1], [0.1, 0.9]])
-        monkeypatch.setattr(train_local.xgb, "XGBRegressor", lambda **_: regressor)
-        monkeypatch.setattr(train_local.xgb, "XGBClassifier", lambda **_: classifier)
-        monkeypatch.setattr(
-            train_local,
-            "fit_point_calibration",
-            lambda *_: {"point_slope": 1.0, "point_intercept": 0.0},
-        )
-        monkeypatch.setattr(
-            train_local,
-            "fit_haul_calibration",
-            lambda *_: {"haul_slope": 1.0, "haul_intercept": 0.0},
-        )
-        monkeypatch.setattr(train_local, "select_rank_weight", lambda *_: 0.0)
-        completed_metrics = {
-            "mae": 1.0,
-            "brier_score": 2.0,
-            "ndcg_at_15": 3.0,
-            "haul_recall_at_15": 4.0,
-            "early_mae": 5.0,
-            "early_ndcg_at_15": 6.0,
-            "early_haul_recall_at_15": 7.0,
-            "early_fwd_haul_recall_at_15": 8.0,
-            "early_fwd_haul_ndcg": 9.0,
-        }
-        outer_metrics = {key: value + 10 for key, value in completed_metrics.items()}
-        monkeypatch.setattr(
-            train_local,
-            "score_backtest_predictions",
-            lambda _regressor, _classifier, scored, *_: (
-                completed_metrics
-                if scored["season"].iat[0] == "2025-26"
-                else outer_metrics
+            for train, validation, test in folds
+        ] == [
+            (["2021-22"], ["2022-23"], ["2023-24"]),
+            (["2021-22", "2022-23"], ["2023-24"], ["2024-25"]),
+            (["2021-22", "2022-23", "2023-24"], ["2024-25"], ["2025-26"]),
+            (
+                ["2021-22", "2022-23", "2023-24", "2024-25"],
+                ["2025-26"],
+                ["2026-27"],
             ),
+        ]
+        for train, validation, test in folds:
+            test_season = test["season"].iat[0]
+            assert test_season not in set(train["season"])
+            assert test_season not in set(validation["season"])
+            assert test["gameweek"].max() <= train_local.QUALITY_EARLY_GAMEWEEK
+
+    def test_predicted_rounds_are_keyed_by_season(self):
+        regressor = MagicMock()
+        regressor.predict.return_value = np.array([1.0, 2.0])
+        classifier = MagicMock()
+        classifier.predict_proba.return_value = np.array([[0.9, 0.1], [0.9, 0.1]])
+        frame = pd.DataFrame(
+            {
+                "now_cost": [1.0, 2.0],
+                "actual_points": [2, 10],
+                "gameweek": [1, 1],
+                "position": [3, 4],
+                "season": ["2024-25", "2025-26"],
+            }
         )
 
-        metrics, _ = train_local._train_quality_candidate(
-            frame("2021-22", [1, 2]),
-            frame("2024-25", [1, 2]),
-            frame("2025-26", [1, 4]),
-            frame("2026-27", [1, 2]),
+        predicted = train_local._predict_quality_frame(
+            regressor,
+            classifier,
+            frame,
             ["now_cost"],
+            {
+                "point_slope": 1.0,
+                "point_intercept": 0.0,
+                "haul_slope": 1.0,
+                "haul_intercept": 0.0,
+                "rank_haul_weight": 1.0,
+            },
         )
 
-        assert metrics == {
-            "mae": 1.0,
-            "brier_score": 2.0,
-            "ndcg_at_15": 3.0,
-            "haul_recall_at_15": 4.0,
-            "early_mae": 15.0,
-            "early_ndcg_at_15": 16.0,
-            "early_haul_recall_at_15": 17.0,
-            "early_fwd_haul_recall_at_15": 18.0,
-            "early_fwd_haul_ndcg": 19.0,
-        }
-        regressor.fit.assert_called_once()
-        classifier.fit.assert_called_once()
+        assert predicted["round_key"].tolist() == ["2024-25:1", "2025-26:1"]
+
+    def test_paired_standard_error_needs_two_rounds(self):
+        frame = pd.DataFrame(
+            {"actual": [10.0, 0.0], "rank_score": [2.0, 1.0], "round_key": [1, 1]}
+        )
+
+        assert train_local.paired_ndcg_standard_error(frame, frame) is None
 
     def test_quality_gate_applies_balanced_release_thresholds(self):
         baseline = {
@@ -966,7 +1027,15 @@ class TestQualityGate:
             pd.DataFrame(rows), hyperparams={"n_estimators": 2, "max_depth": 2}
         )
 
-        assert set(result) == {"passed", "checks", "baseline", "candidate"}
+        assert set(result) == {
+            "passed",
+            "checks",
+            "baseline",
+            "candidate",
+            "early_gameweeks",
+            "early_ndcg_diff_se",
+        }
+        assert result["early_gameweeks"] == 12
         assert "early_ndcg_at_15" in result["baseline"]
         assert "early_fwd_haul_recall_at_15" in result["baseline"]
         assert "early_fwd_haul_ndcg" in result["baseline"]
