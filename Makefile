@@ -34,7 +34,7 @@ help:
 	@echo "  make import-historical - Import historical data from GitHub"
 	@echo "  make backfill          - Backfill current season from FPL API"
 	@echo "  make archive-predictions - Archive DynamoDB to S3 without deleting"
-	@echo "  make train-local       - Gate and refit release models locally"
+	@echo "  make train-local       - Gate, then refit on all seasons including the current one"
 	@echo "  make quality-gate      - Backtest early-season model against baseline"
 	@echo "  make train-and-upload  - Train locally and upload model to S3"
 	@echo "  make tune              - Tune hyperparameters with Optuna"

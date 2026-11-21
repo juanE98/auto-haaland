@@ -1237,8 +1237,9 @@ class TestMainQualityGate:
 
         regressor.fit.assert_called_once()
         classifier.fit.assert_called_once()
-        assert list(regressor.fit.call_args.args[0]["now_cost"]) == [1, 2, 3, 4, 5]
-        assert list(classifier.fit.call_args.args[0]["now_cost"]) == [1, 2, 3, 4, 5]
+        refit_costs = [1, 2, 3, 4, 5, 90, 91]
+        assert list(regressor.fit.call_args.args[0]["now_cost"]) == refit_costs
+        assert list(classifier.fit.call_args.args[0]["now_cost"]) == refit_costs
         assert gated_hyperparams == {
             "n_estimators": 17,
             "max_depth": 3,
@@ -1254,7 +1255,7 @@ class TestMainQualityGate:
         ]
         save_model.assert_called_once()
         save_metadata.assert_called_once()
-        assert save_metadata.call_args.args[0]["trained_through"] == "2025-26"
+        assert save_metadata.call_args.args[0]["trained_through"] == "2026-27 GW2"
 
     def test_quality_gate_tuning_excludes_outer_holdout(self, monkeypatch, tmp_path):
         seasons = [

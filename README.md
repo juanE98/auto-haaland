@@ -68,7 +68,7 @@ make backfill                   # Backfill current season from FPL API
 make backfill END_GW=22         # Backfill up to GW22 only
 make archive-predictions ARCHIVE_SEASON=2025_26  # Archive without deleting
 make quality-gate               # Compare early-season model with the baseline
-make train-local                # Gate, then refit on all completed seasons
+make train-local                # Gate, then refit on all seasons incl. current
 make train-and-upload ENV=dev   # Gate, refit, and upload the dev model
 
 # Pipeline

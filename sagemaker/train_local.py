@@ -1238,7 +1238,7 @@ def main():
     parser.add_argument(
         "--refit-all",
         action="store_true",
-        help="Refit release models on five completed seasons after the gate passes",
+        help="Refit release models on every season, including the current one, after the gate passes",
     )
 
     # Split strategy
@@ -1351,12 +1351,20 @@ def main():
     # Train model
     if args.refit_all:
         validate_features(df)
-        quality_train, quality_validation, completed_test, _ = (
+        quality_train, quality_validation, completed_test, outer_test = (
             split_quality_gate_seasons(df)
         )
+        # The outer season is only a holdout for the gate; the release model
+        # learns from it so in-season retrains use the latest gameweeks.
         refit_df = pd.concat(
-            [quality_train, quality_validation, completed_test], ignore_index=True
+            [quality_train, quality_validation, completed_test, outer_test],
+            ignore_index=True,
         )
+        latest_season = refit_df["season"].max()
+        latest_gameweek = refit_df.loc[
+            refit_df["season"] == latest_season, "gameweek"
+        ].max()
+        trained_through = f"{latest_season} GW{int(latest_gameweek)}"
         refit_params = {**DEFAULT_HYPERPARAMS, **hyperparams}
         refit_params["n_estimators"] = int(
             quality_report["candidate"]["metadata"]["regression_n_estimators"]
@@ -1394,9 +1402,7 @@ def main():
         {
             "feature_version": FEATURE_VERSION,
             "feature_count": len(FEATURE_COLS),
-            "trained_through": (
-                QUALITY_COMPLETED_TEST_SEASON if args.refit_all else None
-            ),
+            "trained_through": trained_through if args.refit_all else None,
         }
     )
     haul_model_path = None
