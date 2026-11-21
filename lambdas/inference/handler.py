@@ -257,7 +257,9 @@ def run_inference(
     Returns:
         Predictions DataFrame with schema:
         player_id, gameweek, predicted_points, position, player_name, team_id,
-        season, chance_of_playing, haul_probability
+        season, chance_of_playing, haul_probability, rank_score.
+        Points, haul probability and rank are scaled by chance_of_playing and
+        are zero for players without a fixture.
     """
     X = features_df[FEATURE_COLS]
     metadata = {**DEFAULT_MODEL_METADATA, **(model_metadata or {})}
@@ -290,6 +292,22 @@ def run_inference(
     haul_probabilities = np.where(blank, 0.0, haul_probabilities)
     logger.info(f"Zeroed predictions for {int(blank.sum())} blank gameweek players")
 
+    # Availability has no historical record, so it is applied after the model
+    availability = (
+        pd.to_numeric(
+            features_df.get(
+                "chance_of_playing", pd.Series(100, index=features_df.index)
+            ),
+            errors="coerce",
+        )
+        .fillna(100)
+        .clip(0, 100)
+        .to_numpy(dtype=float)
+        / 100.0
+    )
+    predictions = predictions * availability
+    haul_probabilities = np.round(haul_probabilities * availability, 1)
+
     results = pd.DataFrame(
         {
             "player_id": features_df["player_id"].astype(int),
@@ -305,9 +323,7 @@ def run_inference(
                 "team_id", pd.Series([0] * len(features_df))
             ).astype(int),
             "season": season,
-            "chance_of_playing": features_df.get(
-                "chance_of_playing", pd.Series([100] * len(features_df))
-            ).astype(int),
+            "chance_of_playing": (availability * 100).round().astype(int),
             "haul_probability": haul_probabilities,
             "rank_score": (
                 predictions + haul_probabilities * metadata["rank_haul_weight"] / 100.0

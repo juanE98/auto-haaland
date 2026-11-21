@@ -337,6 +337,43 @@ class TestRunInference:
         assert result["haul_probability"].tolist()[1] == 0.0
         assert result["rank_score"].tolist() == [7.2, 0.0, 4.75]
 
+    def test_chance_of_playing_scales_points_haul_and_rank(self, inference_features_df):
+        point_model = MagicMock()
+        point_model.predict.return_value = np.array([6.0, 5.0, 4.0])
+        haul_model = MagicMock()
+        haul_model.predict_proba.return_value = np.array(
+            [[0.2, 0.8], [0.8, 0.2], [0.5, 0.5]]
+        )
+        features = inference_features_df.copy()
+        features["chance_of_playing"] = [100, 50, 0]
+
+        result = run_inference(
+            point_model, features, 20, "2026_27", haul_model=haul_model
+        )
+
+        assert result["predicted_points"].tolist() == [6.0, 2.5, 0.0]
+        assert result["haul_probability"].tolist() == [80.0, 10.0, 0.0]
+        assert result["rank_score"].tolist() == [7.2, 2.65, 0.0]
+
+    def test_missing_chance_of_playing_leaves_predictions_unchanged(
+        self, inference_features_df
+    ):
+        point_model = MagicMock()
+        point_model.predict.return_value = np.array([6.0, 5.0, 4.0])
+        features = inference_features_df.copy()
+        features["chance_of_playing"] = [None, None, None]
+
+        result = run_inference(
+            point_model, features.drop(columns=["chance_of_playing"]), 20, "2026_27"
+        )
+        null_result = run_inference(point_model, features, 20, "2026_27")
+
+        assert result["predicted_points"].tolist() == [6.0, 5.0, 4.0]
+        assert (
+            null_result["predicted_points"].tolist()
+            == result["predicted_points"].tolist()
+        )
+
     def test_all_blank_gameweek_raises(self, inference_features_df):
         point_model = MagicMock()
         point_model.predict.return_value = np.array([6.0, 5.0, 4.0])
