@@ -319,6 +319,33 @@ class TestRunInference:
         assert result["predicted_points"].tolist() == [6.0, 5.0, 4.0]
         assert result["rank_score"].tolist() == [7.2, 5.3, 4.75]
 
+    def test_blank_gameweek_player_scores_zero(self, inference_features_df):
+        point_model = MagicMock()
+        point_model.predict.return_value = np.array([6.0, 5.0, 4.0])
+        haul_model = MagicMock()
+        haul_model.predict_proba.return_value = np.array(
+            [[0.2, 0.8], [0.8, 0.2], [0.5, 0.5]]
+        )
+        features = inference_features_df.copy()
+        features.loc[1, "dgw_fixture_count"] = 0.0
+
+        result = run_inference(
+            point_model, features, 20, "2026_27", haul_model=haul_model
+        )
+
+        assert result["predicted_points"].tolist() == [6.0, 0.0, 4.0]
+        assert result["haul_probability"].tolist()[1] == 0.0
+        assert result["rank_score"].tolist() == [7.2, 0.0, 4.75]
+
+    def test_all_blank_gameweek_raises(self, inference_features_df):
+        point_model = MagicMock()
+        point_model.predict.return_value = np.array([6.0, 5.0, 4.0])
+        features = inference_features_df.copy()
+        features["dgw_fixture_count"] = 0.0
+
+        with pytest.raises(ValueError, match="zero fixtures"):
+            run_inference(point_model, features, 20, "2026_27")
+
     def test_model_metadata_calibrates_points_and_rank(self, inference_features_df):
         point_model = MagicMock()
         point_model.predict.return_value = np.array([3.0, 2.0, 1.0])

@@ -281,6 +281,15 @@ def run_inference(
         haul_probabilities = predictions * 0.0
         logger.info("No haul model available, setting haul_probability to 0")
 
+    # Training data never contains a player without a fixture, so the model
+    # cannot represent a blank gameweek. Apply it as a rule instead.
+    blank = (X["dgw_fixture_count"] == 0).to_numpy()
+    if blank.all():
+        raise ValueError("Every player has zero fixtures: check the fixtures input")
+    predictions = np.where(blank, 0.0, predictions)
+    haul_probabilities = np.where(blank, 0.0, haul_probabilities)
+    logger.info(f"Zeroed predictions for {int(blank.sum())} blank gameweek players")
+
     results = pd.DataFrame(
         {
             "player_id": features_df["player_id"].astype(int),

@@ -512,4 +512,7 @@ def inference_features_df():
     df["player_name"] = ["Salah", "Haaland", "Saka"]
     df["team_id"] = [10, 5, 1]
     df["gameweek"] = [20, 20, 20]
+    # Every player has one fixture; blank gameweeks are tested explicitly
+    df["dgw_fixture_count"] = 1.0
+    df["is_double_gameweek"] = 0.0
     return df
