@@ -8,7 +8,7 @@ using the same feature engineering as the feature processor Lambda.
 Usage:
     python scripts/backfill_current_season.py --output-dir data/current/
     python scripts/backfill_current_season.py --output-dir data/current/ \
-        --upload-s3 --bucket fpl-ml-data-dev --start-gw 4
+        --upload-s3 --bucket fpl-ml-data-dev --start-gw 1
 """
 
 import argparse
@@ -45,8 +45,13 @@ from lambdas.common.feature_categories.team_features import (  # noqa: E402
 from lambdas.common.feature_config import (  # noqa: E402
     BOOTSTRAP_FEATURES,
     FEATURE_COLS,
+    aggregate_history_by_round,
     compute_derived_features,
+    compute_prior_features,
+    compute_prior_fwd_ict_per_90,
+    compute_prior_team_context,
     compute_rolling_features,
+    get_prior_team_features,
 )
 from lambdas.common.fpl_api import FPLApiClient  # noqa: E402
 
@@ -143,7 +148,7 @@ def fetch_all_player_histories(
     player_ids: list[int],
     batch_size: int = BATCH_SIZE,
     batch_delay: float = BATCH_DELAY,
-) -> dict[int, list[dict]]:
+) -> dict[int, dict[str, list[dict]]]:
     """
     Fetch element-summary for all players in batches.
 
@@ -154,7 +159,7 @@ def fetch_all_player_histories(
         batch_delay: Delay between batches in seconds
 
     Returns:
-        Dict mapping player_id to list of history entries
+        Dict mapping player_id to current and previous-season history
     """
     all_histories = {}
     total = len(player_ids)
@@ -172,11 +177,13 @@ def fetch_all_player_histories(
         for player_id in batch:
             try:
                 summary = api_client.get_player_summary(player_id)
-                history = summary.get("history", [])
-                all_histories[player_id] = history
+                all_histories[player_id] = {
+                    "history": summary.get("history", []),
+                    "history_past": summary.get("history_past", []),
+                }
             except Exception as e:
                 logger.warning(f"Failed to fetch history for player {player_id}: {e}")
-                all_histories[player_id] = []
+                all_histories[player_id] = {"history": [], "history_past": []}
 
         # Rate limiting pause between batches
         if i + batch_size < total:
@@ -274,9 +281,79 @@ def get_fixture_info(
     return 3, 0, 1200, 1200
 
 
+def _team_from_history_entry(
+    entry: dict,
+    fixtures: list[dict],
+    gameweek: int,
+) -> int | None:
+    """Reconstruct the player's team from one history entry and its fixture."""
+    fixture_id = entry.get("fixture")
+    if fixture_id is not None:
+        fixture = next((f for f in fixtures if f.get("id") == fixture_id), None)
+        if fixture is not None:
+            candidates = [fixture]
+        else:
+            candidates = []
+    else:
+        candidates = []
+
+    was_home = entry.get("was_home")
+    opponent_id = entry.get("opponent_team")
+    if not candidates and opponent_id is not None and isinstance(was_home, bool):
+        candidates = [
+            fixture
+            for fixture in fixtures
+            if fixture.get("event") in (None, gameweek)
+            and (
+                (was_home and fixture.get("team_a") == opponent_id)
+                or (not was_home and fixture.get("team_h") == opponent_id)
+            )
+        ]
+        if len(candidates) != 1:
+            return None
+
+    if len(candidates) != 1 or not isinstance(was_home, bool):
+        return None
+
+    fixture = candidates[0]
+    expected_opponent = fixture.get("team_a" if was_home else "team_h")
+    if opponent_id is not None and opponent_id != expected_opponent:
+        return None
+    return fixture.get("team_h" if was_home else "team_a")
+
+
+def get_gameweek_player_team_ids(
+    all_histories: dict[int, object],
+    fixtures: list[dict],
+    gameweek: int,
+) -> dict[int, int]:
+    """Build a fail-closed target-gameweek player roster from raw history."""
+    player_team_ids = {}
+    for player_id, player_summary in all_histories.items():
+        full_history = (
+            player_summary
+            if isinstance(player_summary, list)
+            else player_summary.get("history", [])
+        )
+        entries = [entry for entry in full_history if entry.get("round") == gameweek]
+        if not entries:
+            continue
+        derived_team_ids = [
+            _team_from_history_entry(entry, fixtures, gameweek) for entry in entries
+        ]
+        team_ids = set(derived_team_ids)
+        if None in team_ids or len(team_ids) != 1:
+            logger.warning(
+                "Could not reconstruct GW%s team for player %s", gameweek, player_id
+            )
+            continue
+        player_team_ids[player_id] = team_ids.pop()
+    return player_team_ids
+
+
 def engineer_backfill_features(
     players: list[dict],
-    all_histories: dict[int, list[dict]],
+    all_histories: dict[int, object],
     fixtures: list[dict],
     team_strength_map: dict[int, int],
     gameweek: int,
@@ -299,22 +376,34 @@ def engineer_backfill_features(
         DataFrame with features and actual_points target
     """
     features = []
+    player_team_ids = get_gameweek_player_team_ids(all_histories, fixtures, gameweek)
+    prior_team_context = compute_prior_team_context(player_team_ids, all_histories)
 
     for player in players:
         player_id = player["id"]
-        team_id = player["team"]
-        full_history = all_histories.get(player_id, [])
+        team_id = player_team_ids.get(player_id)
+        player_summary = all_histories.get(player_id, {})
+        if isinstance(player_summary, list):
+            full_history = player_summary
+            history_past = []
+        else:
+            full_history = player_summary.get("history", [])
+            history_past = player_summary.get("history_past", [])
 
         # Get actual points for this gameweek (target variable)
         gw_entry = get_gameweek_entry(full_history, gameweek)
         if gw_entry is None:
             # Player did not play in this gameweek
             continue
+        if team_id is None:
+            continue
 
         actual_points = gw_entry.get("total_points", 0)
 
         # Filter history to ONLY prior gameweeks (prevent data leakage)
-        prior_history = filter_history_before_gameweek(full_history, gameweek)
+        prior_history = aggregate_history_by_round(
+            filter_history_before_gameweek(full_history, gameweek)
+        )
 
         # Calculate rolling features from prior history
         if prior_history:
@@ -352,6 +441,22 @@ def engineer_backfill_features(
 
         # Derived features
         derived = compute_derived_features(prior_history, rolling, static)
+        early_season = {
+            "history_game_count": float(min(len(prior_history), 10)),
+            **compute_prior_features(history_past),
+        }
+        early_season["prior_fwd_ict_per_90"] = compute_prior_fwd_ict_per_90(
+            early_season["prior_ict_per_90"], static["position"]
+        )
+        opponent_team_ids = [
+            fixture["team_a"] if fixture.get("team_h") == team_id else fixture["team_h"]
+            for fixture in fixtures
+            if fixture.get("event") in (None, gameweek)
+            and team_id in (fixture.get("team_h"), fixture.get("team_a"))
+        ]
+        prior_team_features = get_prior_team_features(
+            prior_team_context, team_id, opponent_team_ids
+        )
 
         # Current bootstrap totals include the target and later gameweeks, so
         # they cannot be reconstructed safely for historical rows.
@@ -401,6 +506,8 @@ def engineer_backfill_features(
         feature_row.update(position_feats)
         feature_row.update(interaction_feats)
         feature_row.update(derived)
+        feature_row.update(early_season)
+        feature_row.update(prior_team_features)
         feature_row["actual_points"] = actual_points
 
         features.append(feature_row)
@@ -471,8 +578,8 @@ def main():
     parser.add_argument(
         "--start-gw",
         type=int,
-        default=4,
-        help="First gameweek to generate training rows for (default: 4)",
+        default=1,
+        help="First gameweek to generate training rows for (default: 1)",
     )
     parser.add_argument(
         "--upload-s3",

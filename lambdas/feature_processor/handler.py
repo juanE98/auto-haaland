@@ -22,9 +22,14 @@ from common.feature_categories.position_features import compute_position_feature
 from common.feature_categories.team_features import compute_team_features
 from common.feature_config import (
     FEATURE_COLS,
+    aggregate_history_by_round,
     compute_bootstrap_features,
     compute_derived_features,
+    compute_prior_features,
+    compute_prior_fwd_ict_per_90,
+    compute_prior_team_context,
     compute_rolling_features,
+    get_prior_team_features,
 )
 
 # Configure logging
@@ -62,7 +67,7 @@ def load_fixtures_from_s3(
 
 def load_player_histories_from_s3(
     s3_client, bucket: str, gameweek: int, season: str
-) -> Dict[int, List[Dict[str, Any]]]:
+) -> Dict[int, Dict[str, List[Dict[str, Any]]]]:
     """
     Load player history data from S3.
 
@@ -70,7 +75,7 @@ def load_player_histories_from_s3(
     then falls back to individual player files (gw{N}_players/player_{id}.json)
     for backwards compatibility.
 
-    Returns a dict mapping player_id -> list of gameweek history entries.
+    Returns a dict mapping player_id to current and previous-season history.
     Returns empty dict if player histories don't exist.
     """
     # Try combined histories file first
@@ -80,7 +85,10 @@ def load_player_histories_from_s3(
         histories = {}
         for player_id_str, player_data in data.items():
             player_id = int(player_id_str)
-            histories[player_id] = player_data.get("history", [])
+            histories[player_id] = {
+                "history": player_data.get("history", []),
+                "history_past": player_data.get("history_past", []),
+            }
         logger.info(f"Loaded combined histories for {len(histories)} players")
         return histories
     except ClientError as e:
@@ -115,8 +123,10 @@ def load_player_histories_from_s3(
                     player_id = int(
                         filename.replace("player_", "").replace(".json", "")
                     )
-                    # Player summary contains "history" key with list of gameweek data
-                    histories[player_id] = data.get("history", [])
+                    histories[player_id] = {
+                        "history": data.get("history", []),
+                        "history_past": data.get("history_past", []),
+                    }
                 except Exception as e:
                     logger.warning(f"Failed to load {key}: {e}")
                     continue
@@ -157,7 +167,7 @@ def get_opponent_info(
         opp_defence_strength) where is_home is 1 or 0
     """
     for fixture in fixtures:
-        if gameweek is not None and fixture.get("event") not in (None, gameweek):
+        if gameweek is not None and fixture.get("event") != gameweek:
             continue
         if fixture.get("team_h") == player_team_id:
             # Player's team is home, opponent is away
@@ -197,7 +207,10 @@ def get_team_fixtures(
 ) -> List:
     """Get fixtures for a specific team, optionally filtered by gameweek."""
     team_fixtures = [
-        f for f in fixtures if f.get("team_h") == team_id or f.get("team_a") == team_id
+        f
+        for f in fixtures
+        if f.get("event") is not None
+        and (f.get("team_h") == team_id or f.get("team_a") == team_id)
     ]
     if before_gw:
         team_fixtures = [f for f in team_fixtures if f.get("event", 0) < before_gw]
@@ -212,6 +225,7 @@ def get_upcoming_fixtures(
         f
         for f in fixtures
         if (f.get("team_h") == team_id or f.get("team_a") == team_id)
+        and f.get("event") is not None
         and f.get("event", 0) >= current_gw
     ][:count]
 
@@ -257,7 +271,7 @@ def get_next_gw_fixtures(
 def engineer_features(
     bootstrap: Dict[str, Any],
     fixtures: List[Dict[str, Any]],
-    player_histories: Dict[int, List[Dict[str, Any]]],
+    player_histories: Dict[int, Any],
     mode: str,
     gameweek: int,
 ) -> pd.DataFrame:
@@ -278,14 +292,25 @@ def engineer_features(
     teams = bootstrap.get("teams", [])
 
     features = []
+    prior_team_context = compute_prior_team_context(
+        {player["id"]: player["team"] for player in players}, player_histories
+    )
 
     for player in players:
         player_id = player["id"]
         team_id = player["team"]
 
         # Current and future results are targets, never model inputs.
-        full_history = player_histories.get(player_id, [])
-        history = [h for h in full_history if h.get("round", 0) < gameweek]
+        player_summary = player_histories.get(player_id, {})
+        if isinstance(player_summary, list):
+            full_history = player_summary
+            history_past = []
+        else:
+            full_history = player_summary.get("history", [])
+            history_past = player_summary.get("history_past", [])
+        history = aggregate_history_by_round(
+            [h for h in full_history if h.get("round", 0) < gameweek]
+        )
 
         # Calculate rolling features from history
         if history:
@@ -329,6 +354,22 @@ def engineer_features(
 
         # Derived features
         derived = compute_derived_features(history, rolling, static)
+        early_season = {
+            "history_game_count": float(min(len(history), 10)),
+            **compute_prior_features(history_past),
+        }
+        early_season["prior_fwd_ict_per_90"] = compute_prior_fwd_ict_per_90(
+            early_season["prior_ict_per_90"], static["position"]
+        )
+        opponent_team_ids = [
+            fixture["team_a"] if fixture.get("team_h") == team_id else fixture["team_h"]
+            for fixture in fixtures
+            if fixture.get("event") == gameweek
+            and team_id in (fixture.get("team_h"), fixture.get("team_a"))
+        ]
+        prior_team_features = get_prior_team_features(
+            prior_team_context, team_id, opponent_team_ids
+        )
 
         # Get team and opponent data for new feature categories
         all_players = players
@@ -424,6 +465,8 @@ def engineer_features(
         row.update(position_features)  # 8 features
         row.update(interaction_features)  # 5 features
         row.update(derived)  # 5 features
+        row.update(early_season)  # 7 features
+        row.update(prior_team_features)  # 6 features
 
         # Add actual points for historical mode (training target)
         if mode == "historical" and full_history:

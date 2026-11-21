@@ -4,7 +4,6 @@ Unit tests for the inference Lambda handler.
 
 import io
 import json
-import os
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -13,9 +12,10 @@ import pytest
 import xgboost as xgb
 from moto import mock_aws
 
+import lambdas.inference.handler as inference_handler
+from lambdas.common.feature_config import FEATURE_VERSION
 from lambdas.inference.handler import (
     FEATURE_COLS,
-    POSITION_MAP,
     handler,
     load_features_from_s3,
     load_model_from_s3,
@@ -126,14 +126,22 @@ class TestLoadModelFromS3:
 class TestLoadModelMetadata:
     def test_loads_and_merges_metadata(self):
         s3 = MagicMock()
+        stored = {
+            "point_slope": 1.2,
+            "feature_version": FEATURE_VERSION,
+            "feature_count": len(FEATURE_COLS),
+            "trained_through": "2025-26",
+        }
         s3.get_object.return_value = {
-            "Body": MagicMock(read=MagicMock(return_value=b'{"point_slope": 1.2}'))
+            "Body": MagicMock(read=MagicMock(return_value=json.dumps(stored).encode()))
         }
 
         result = load_model_metadata_from_s3(s3, "bucket", "metadata.json")
 
         assert result["point_slope"] == 1.2
         assert result["rank_haul_weight"] == 1.5
+        assert result["feature_version"] == FEATURE_VERSION
+        assert result["trained_through"] == "2025-26"
 
     def test_missing_metadata_uses_safe_defaults(self):
         from botocore.exceptions import ClientError
@@ -147,6 +155,37 @@ class TestLoadModelMetadata:
 
         assert result["point_slope"] == 1.0
         assert result["haul_slope"] == 1.0
+
+    def test_model_metadata_rejects_prior_contract_before_prediction(self):
+        stale_metadata = {"feature_version": "5.0.0", "feature_count": 108}
+
+        with (
+            patch.object(inference_handler, "get_s3_client"),
+            patch.object(
+                inference_handler, "load_model_from_s3", return_value=MagicMock()
+            ),
+            patch.object(
+                inference_handler, "load_haul_model_from_s3", return_value=None
+            ),
+            patch.object(
+                inference_handler,
+                "load_model_metadata_from_s3",
+                return_value=stale_metadata,
+            ),
+            patch.object(inference_handler, "run_inference") as run_inference,
+        ):
+            with pytest.raises(ValueError, match="feature version"):
+                handler({"gameweek": 1, "season": "2026_27"}, None)
+
+        run_inference.assert_not_called()
+
+    def test_model_metadata_accepts_current_feature_contract(self):
+        inference_handler.validate_model_metadata(
+            {
+                "feature_version": FEATURE_VERSION,
+                "feature_count": len(FEATURE_COLS),
+            }
+        )
 
     def test_cached_model_returned(self):
         """Cached model should be returned without hitting S3."""
@@ -370,6 +409,16 @@ class TestHandler:
 
         # Upload model
         s3.upload_file(model_path, "fpl-ml-data", "models/model.xgb")
+        s3.put_object(
+            Bucket="fpl-ml-data",
+            Key="models/model_metadata.json",
+            Body=json.dumps(
+                {
+                    "feature_version": FEATURE_VERSION,
+                    "feature_count": len(FEATURE_COLS),
+                }
+            ),
+        )
 
         # Upload features
         s3.put_object(

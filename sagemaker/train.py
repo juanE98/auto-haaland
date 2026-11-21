@@ -37,7 +37,7 @@ SM_MODEL_DIR = os.environ.get("SM_MODEL_DIR", "/opt/ml/model")
 SM_OUTPUT_DATA_DIR = os.environ.get("SM_OUTPUT_DATA_DIR", "/opt/ml/output/data")
 
 # Feature version - must match lambdas/common/feature_config.py FEATURE_VERSION
-FEATURE_VERSION = "3.2.0"
+FEATURE_VERSION = "5.1.0"
 
 # Available feature columns. The container is isolated from Lambda modules, so
 # the final model contract below is repeated here and covered by a parity test.
@@ -294,7 +294,7 @@ AVAILABLE_FEATURE_COLS = [
     "points_volatility",
 ]
 
-# Only these 94 signals can be reproduced by both the free historical data and
+# Only these 109 signals can be reproduced by both the free historical data and
 # the live pipeline. The first 82 available columns are the rolling features.
 FEATURE_COLS = AVAILABLE_FEATURE_COLS[:82] + [
     "form_score",
@@ -309,7 +309,26 @@ FEATURE_COLS = AVAILABLE_FEATURE_COLS[:82] + [
     "points_per_90",
     "goal_contributions_last_3",
     "points_volatility",
+    "history_game_count",
+    "prior_points_per_90",
+    "prior_goals_per_90",
+    "prior_assists_per_90",
+    "prior_bonus_per_90",
+    "prior_season_minutes",
+    "prior_season_available",
+    "prior_ict_per_90",
+    "prior_fwd_ict_per_90",
+    "prior_team_goals_per_match",
+    "prior_team_squad_minutes",
+    "prior_team_context_available",
+    "prior_opponent_goals_conceded_per_90",
+    "prior_opponent_squad_minutes",
+    "prior_opponent_context_available",
 ]
+MODEL_CONTRACT_METADATA = {
+    "feature_version": FEATURE_VERSION,
+    "feature_count": len(FEATURE_COLS),
+}
 
 TARGET_COL = "actual_points"
 
@@ -539,6 +558,7 @@ def train(args):
         "haul_slope": 1.0,
         "haul_intercept": 0.0,
         "rank_haul_weight": 1.5,
+        **MODEL_CONTRACT_METADATA,
     }
     with open(model_path / "model_metadata.json", "w") as metadata_file:
         json.dump(metadata, metadata_file, indent=2)

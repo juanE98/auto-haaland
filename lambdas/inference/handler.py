@@ -18,7 +18,7 @@ import xgboost as xgb
 from botocore.exceptions import ClientError
 
 from common.aws_clients import get_s3_client
-from common.feature_config import FEATURE_COLS
+from common.feature_config import FEATURE_COLS, FEATURE_VERSION
 
 # Configure logging
 logger = logging.getLogger()
@@ -156,7 +156,7 @@ def load_haul_model_from_s3(
 
 def load_model_metadata_from_s3(
     s3_client, bucket: str, metadata_key: str
-) -> dict[str, float]:
+) -> dict[str, Any]:
     """Load optional model calibration metadata with backwards-safe defaults."""
     try:
         response = s3_client.get_object(Bucket=bucket, Key=metadata_key)
@@ -167,11 +167,24 @@ def load_model_metadata_from_s3(
             return DEFAULT_MODEL_METADATA.copy()
         raise
 
-    metadata = DEFAULT_MODEL_METADATA.copy()
-    for key in metadata:
-        if key in stored:
-            metadata[key] = float(stored[key])
+    metadata = {**DEFAULT_MODEL_METADATA, **stored}
+    for key in DEFAULT_MODEL_METADATA:
+        metadata[key] = float(metadata[key])
     return metadata
+
+
+def validate_model_metadata(metadata: dict[str, Any]) -> None:
+    """Fail fast when model and feature processor contracts are incompatible."""
+    if metadata.get("feature_version") != FEATURE_VERSION:
+        raise ValueError(
+            "Model feature version does not match inference contract: "
+            f"{metadata.get('feature_version')} != {FEATURE_VERSION}"
+        )
+    if int(metadata.get("feature_count", -1)) != len(FEATURE_COLS):
+        raise ValueError(
+            "Model feature count does not match inference contract: "
+            f"{metadata.get('feature_count')} != {len(FEATURE_COLS)}"
+        )
 
 
 def load_features_from_s3(
@@ -389,6 +402,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     model_metadata = load_model_metadata_from_s3(
         s3_client, BUCKET_NAME, MODEL_METADATA_KEY
     )
+    validate_model_metadata(model_metadata)
 
     # Load and validate features
     features_df = load_features_from_s3(s3_client, BUCKET_NAME, features_file)

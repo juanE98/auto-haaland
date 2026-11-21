@@ -14,7 +14,6 @@ import pytest
 
 from lambdas.common.feature_config import FEATURE_COLS
 from lambdas.feature_processor.handler import (
-    engineer_features,
     handler,
     load_bootstrap_from_s3,
     load_fixtures_from_s3,
@@ -126,8 +125,9 @@ class TestFeatureProcessorS3Integration:
         assert len(result) == 2
         assert 350 in result
         assert 328 in result
-        assert len(result[350]) == 2
-        assert result[350][0]["total_points"] == 8
+        assert len(result[350]["history"]) == 2
+        assert result[350]["history"][0]["total_points"] == 8
+        assert result[350]["history_past"] == []
 
     def test_save_features_json_to_s3(self, localstack_s3_client, clean_s3_bucket):
         """Test saving features DataFrame as JSON to S3."""

@@ -3,12 +3,12 @@ Unit tests for the feature configuration module.
 """
 
 import math
-import os
 import re
 from pathlib import Path
 
 import pytest
 
+import lambdas.common.feature_config as feature_config
 from lambdas.common.feature_categories.fixture_features import FIXTURE_FEATURES
 from lambdas.common.feature_categories.interaction_features import INTERACTION_FEATURES
 from lambdas.common.feature_categories.opponent_features import OPPONENT_FEATURES
@@ -20,7 +20,6 @@ from lambdas.common.feature_config import (
     FEATURE_COLS,
     FEATURE_VERSION,
     ROLLING_FEATURE_NAMES,
-    ROLLING_STATS,
     STATIC_FEATURES,
     TARGET_COL,
     calculate_minutes_pct,
@@ -37,9 +36,9 @@ from lambdas.common.feature_config import (
 
 @pytest.mark.unit
 class TestFeatureList:
-    def test_feature_cols_has_94_entries(self):
+    def test_feature_cols_has_109_entries(self):
         """The model uses only historically reproducible features."""
-        assert len(FEATURE_COLS) == 94
+        assert len(FEATURE_COLS) == 109
 
     def test_no_duplicate_feature_names(self):
         """All feature names should be unique."""
@@ -98,6 +97,8 @@ class TestFeatureList:
             ]
             + ["is_double_gameweek", "dgw_fixture_count"]
             + DERIVED_FEATURES
+            + feature_config.EARLY_SEASON_FEATURES
+            + feature_config.MODEL_V5_FEATURES
         )
         assert FEATURE_COLS == expected
 
@@ -186,6 +187,34 @@ class TestFeatureList:
         ]
         for feat in expected:
             assert feat in FEATURE_COLS, f"Missing feature: {feat}"
+
+    def test_early_season_features_present(self):
+        expected = {
+            "history_game_count",
+            "prior_points_per_90",
+            "prior_goals_per_90",
+            "prior_assists_per_90",
+            "prior_bonus_per_90",
+            "prior_season_minutes",
+            "prior_season_available",
+        }
+        assert expected <= set(FEATURE_COLS)
+
+    def test_v5_features_are_model_inputs(self):
+        assert feature_config.MODEL_V5_FEATURES == [
+            "prior_ict_per_90",
+            "prior_fwd_ict_per_90",
+            "prior_team_goals_per_match",
+            "prior_team_squad_minutes",
+            "prior_team_context_available",
+            "prior_opponent_goals_conceded_per_90",
+            "prior_opponent_squad_minutes",
+            "prior_opponent_context_available",
+        ]
+        assert set(feature_config.MODEL_V5_FEATURES) <= set(FEATURE_COLS)
+
+    def test_feature_version_marks_incompatible_contract(self):
+        assert FEATURE_VERSION == "5.1.0"
 
     def test_new_xg_xa_features_present(self):
         """Verify xG and xA features are present with all windows."""
@@ -508,6 +537,189 @@ class TestComputeRollingFeatures:
     def test_empty_history(self):
         result = compute_rolling_features([])
         assert all(v == 0.0 for v in result.values())
+
+
+@pytest.mark.unit
+class TestEarlySeasonFeatures:
+    @pytest.mark.parametrize("prior_ict", [None, "bad", float("nan")])
+    def test_prior_forward_ict_defaults_invalid_values_to_zero(self, prior_ict):
+        assert feature_config.compute_prior_fwd_ict_per_90(prior_ict, 4) == 0.0
+
+    def test_prior_ict_per_90_uses_latest_completed_season(self):
+        result = feature_config.compute_prior_features(
+            [
+                {"ict_index": "90.0", "minutes": 1800},
+                {"ict_index": "75.0", "minutes": 900},
+            ]
+        )
+
+        assert result["prior_ict_per_90"] == pytest.approx(7.5)
+
+    def test_prior_features_use_latest_completed_season(self):
+        history_past = [
+            {
+                "season_name": "2024/25",
+                "total_points": 100,
+                "minutes": 1800,
+                "goals_scored": 5,
+                "assists": 4,
+                "bonus": 10,
+            },
+            {
+                "season_name": "2025/26",
+                "total_points": 200,
+                "minutes": 2250,
+                "goals_scored": 20,
+                "assists": 10,
+                "bonus": 30,
+            },
+        ]
+
+        result = feature_config.compute_prior_features(history_past)
+
+        assert result == {
+            "prior_ict_per_90": pytest.approx(0.0),
+            "prior_points_per_90": pytest.approx(8.0),
+            "prior_goals_per_90": pytest.approx(0.8),
+            "prior_assists_per_90": pytest.approx(0.4),
+            "prior_bonus_per_90": pytest.approx(1.2),
+            "prior_season_minutes": 2250.0,
+            "prior_season_available": 1.0,
+        }
+
+    def test_prior_features_default_for_new_player(self):
+        assert feature_config.compute_prior_features([]) == {
+            "prior_ict_per_90": 0.0,
+            "prior_points_per_90": 0.0,
+            "prior_goals_per_90": 0.0,
+            "prior_assists_per_90": 0.0,
+            "prior_bonus_per_90": 0.0,
+            "prior_season_minutes": 0.0,
+            "prior_season_available": 0.0,
+        }
+
+    def test_history_aggregation_collapses_double_gameweek(self):
+        history = [
+            {
+                "round": 3,
+                "total_points": 8,
+                "minutes": 90,
+                "goals_scored": 1,
+                "transfers_in": 100,
+            },
+            {
+                "round": 3,
+                "total_points": 3,
+                "minutes": 70,
+                "goals_scored": 0,
+                "transfers_in": 120,
+            },
+            {"round": 4, "total_points": 2, "minutes": 90},
+        ]
+
+        result = feature_config.aggregate_history_by_round(history)
+
+        assert len(result) == 2
+        assert result[0]["total_points"] == 11
+        assert result[0]["minutes"] == 160
+        assert result[0]["goals_scored"] == 1
+        assert result[0]["transfers_in"] == 120
+        assert result[0]["fixture_count"] == 2
+
+
+@pytest.mark.unit
+class TestPriorTeamFeatures:
+    def test_prior_team_context_uses_latest_squad_season(self):
+        context = feature_config.compute_prior_team_context(
+            {1: 10, 2: 10, 3: 10},
+            {
+                1: {
+                    "history_past": [
+                        {"goals_scored": 99, "goals_conceded": 99, "minutes": 9999},
+                        {"goals_scored": "10", "goals_conceded": "20", "minutes": 900},
+                    ]
+                },
+                2: {
+                    "history_past": [
+                        {"goals_scored": 2, "goals_conceded": 10, "minutes": 450}
+                    ]
+                },
+                3: {
+                    "history_past": [
+                        {"goals_scored": 7, "goals_conceded": 7, "minutes": 0}
+                    ]
+                },
+            },
+        )
+
+        assert context[10] == {
+            "goals_per_match": pytest.approx(12 / 38),
+            "goals_conceded_per_90": pytest.approx(2.0),
+            "squad_minutes": 1350.0,
+            "context_available": 1.0,
+        }
+
+    def test_prior_team_context_defaults_missing_or_zero_minute_histories(self):
+        context = feature_config.compute_prior_team_context(
+            {1: 10, 2: 11},
+            {
+                1: {"history_past": []},
+                2: {"history_past": [{"minutes": "nan"}]},
+            },
+        )
+
+        assert context == {
+            10: {
+                "goals_per_match": 0.0,
+                "goals_conceded_per_90": 0.0,
+                "squad_minutes": 0.0,
+                "context_available": 0.0,
+            },
+            11: {
+                "goals_per_match": 0.0,
+                "goals_conceded_per_90": 0.0,
+                "squad_minutes": 0.0,
+                "context_available": 0.0,
+            },
+        }
+        assert all(
+            math.isfinite(value) for team in context.values() for value in team.values()
+        )
+
+    def test_prior_team_features_average_double_gameweek_opponents(self):
+        features = feature_config.get_prior_team_features(
+            {
+                10: {
+                    "goals_per_match": 1.5,
+                    "goals_conceded_per_90": 1.1,
+                    "squad_minutes": 1100.0,
+                    "context_available": 1.0,
+                },
+                20: {
+                    "goals_per_match": 0.8,
+                    "goals_conceded_per_90": 1.0,
+                    "squad_minutes": 900.0,
+                    "context_available": 1.0,
+                },
+                30: {
+                    "goals_per_match": 0.9,
+                    "goals_conceded_per_90": 2.0,
+                    "squad_minutes": 1800.0,
+                    "context_available": 1.0,
+                },
+            },
+            10,
+            [20, 30],
+        )
+
+        assert features == {
+            "prior_team_goals_per_match": 1.5,
+            "prior_team_squad_minutes": 1100.0,
+            "prior_team_context_available": 1.0,
+            "prior_opponent_goals_conceded_per_90": 1.5,
+            "prior_opponent_squad_minutes": 1350.0,
+            "prior_opponent_context_available": 1.0,
+        }
 
 
 # === Compute Derived Features ===

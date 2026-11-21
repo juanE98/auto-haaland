@@ -13,7 +13,7 @@ import math
 from typing import Any
 
 # Feature version for tracking compatibility between components
-FEATURE_VERSION = "3.2.0"
+FEATURE_VERSION = "5.1.0"
 
 # Rolling stat definitions: each entry maps a stat name to the history field
 # it is derived from, plus which rolling windows to compute.
@@ -171,6 +171,27 @@ DERIVED_FEATURES = [
     "points_volatility",
 ]
 
+EARLY_SEASON_FEATURES = [
+    "history_game_count",
+    "prior_points_per_90",
+    "prior_goals_per_90",
+    "prior_assists_per_90",
+    "prior_bonus_per_90",
+    "prior_season_minutes",
+    "prior_season_available",
+]
+
+MODEL_V5_FEATURES = [
+    "prior_ict_per_90",
+    "prior_fwd_ict_per_90",
+    "prior_team_goals_per_match",
+    "prior_team_squad_minutes",
+    "prior_team_context_available",
+    "prior_opponent_goals_conceded_per_90",
+    "prior_opponent_squad_minutes",
+    "prior_opponent_context_available",
+]
+
 TARGET_COL = "actual_points"
 
 
@@ -200,7 +221,8 @@ ROLLING_FEATURE_NAMES = _generate_rolling_names()
 # The canonical model contract contains only signals reproducible in both the
 # free historical data and live inference data. Availability remains response
 # metadata, while the two reproducible fixture fields cover double gameweeks.
-# Total: 82 rolling + 5 static + 2 fixture + 5 derived = 94 features.
+# Total: 82 rolling + 5 static + 2 fixture + 5 derived + 7 early-season
+# features + 8 v5 features = 109 features.
 FEATURE_COLS = (
     ROLLING_FEATURE_NAMES
     + [
@@ -216,12 +238,167 @@ FEATURE_COLS = (
     ]
     + ["is_double_gameweek", "dgw_fixture_count"]
     + DERIVED_FEATURES
+    + EARLY_SEASON_FEATURES
+    + MODEL_V5_FEATURES
 )
 
 
 # ---------------------------------------------------------------------------
 # Shared computation functions
 # ---------------------------------------------------------------------------
+
+
+def _safe_float(value: Any) -> float:
+    """Coerce an API or CSV value to a finite float."""
+    try:
+        result = float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    return result if math.isfinite(result) else 0.0
+
+
+def compute_prior_features(
+    history_past: list[dict[str, Any]],
+) -> dict[str, float]:
+    """Compute previous-season per-90 features from the latest completed season."""
+    result = {
+        feature: 0.0 for feature in ["prior_ict_per_90", *EARLY_SEASON_FEATURES[1:]]
+    }
+    if not history_past:
+        return result
+
+    prior = history_past[-1]
+    minutes = _safe_float(prior.get("minutes"))
+    if minutes <= 0:
+        return result
+
+    result.update(
+        {
+            "prior_ict_per_90": _safe_float(prior.get("ict_index")) / minutes * 90,
+            "prior_points_per_90": _safe_float(prior.get("total_points"))
+            / minutes
+            * 90,
+            "prior_goals_per_90": _safe_float(prior.get("goals_scored")) / minutes * 90,
+            "prior_assists_per_90": _safe_float(prior.get("assists")) / minutes * 90,
+            "prior_bonus_per_90": _safe_float(prior.get("bonus")) / minutes * 90,
+            "prior_season_minutes": minutes,
+            "prior_season_available": 1.0,
+        }
+    )
+    return result
+
+
+def compute_prior_fwd_ict_per_90(prior_ict_per_90: Any, position: int) -> float:
+    """Retain previous-season ICT only for forwards."""
+    return _safe_float(prior_ict_per_90) if position == 4 else 0.0
+
+
+def compute_prior_team_context(
+    player_team_ids: dict[int, int],
+    player_summaries: dict[int, Any],
+) -> dict[int, dict[str, float]]:
+    """Aggregate latest previous-season player summaries by current team."""
+    totals = {
+        team_id: {"goals_scored": 0.0, "goals_conceded": 0.0, "minutes": 0.0}
+        for team_id in set(player_team_ids.values())
+    }
+    for player_id, team_id in player_team_ids.items():
+        summary = player_summaries.get(player_id, {})
+        history_past = (
+            summary.get("history_past", []) if isinstance(summary, dict) else []
+        )
+        prior = history_past[-1] if history_past else {}
+        if not isinstance(prior, dict):
+            continue
+
+        minutes = _safe_float(prior.get("minutes"))
+        if minutes <= 0:
+            continue
+        totals[team_id]["goals_scored"] += _safe_float(prior.get("goals_scored"))
+        totals[team_id]["goals_conceded"] += _safe_float(prior.get("goals_conceded"))
+        totals[team_id]["minutes"] += minutes
+
+    return {
+        team_id: {
+            "goals_per_match": (
+                values["goals_scored"] / 38 if values["minutes"] > 0 else 0.0
+            ),
+            "goals_conceded_per_90": (
+                values["goals_conceded"] / values["minutes"] * 90
+                if values["minutes"] > 0
+                else 0.0
+            ),
+            "squad_minutes": values["minutes"],
+            "context_available": 1.0 if values["minutes"] > 0 else 0.0,
+        }
+        for team_id, values in totals.items()
+    }
+
+
+def get_prior_team_features(
+    context: dict[int, dict[str, float]],
+    team_id: int,
+    opponent_team_ids: list[int],
+) -> dict[str, float]:
+    """Return v5 team features, averaging every opponent in a double gameweek."""
+    team_context = context.get(team_id, {})
+    opponents = [
+        context.get(opponent_team_id, {}) for opponent_team_id in opponent_team_ids
+    ]
+
+    def opponent_average(feature: str) -> float:
+        if not opponents:
+            return 0.0
+        return sum(_safe_float(opponent.get(feature)) for opponent in opponents) / len(
+            opponents
+        )
+
+    return {
+        "prior_team_goals_per_match": _safe_float(team_context.get("goals_per_match")),
+        "prior_team_squad_minutes": _safe_float(team_context.get("squad_minutes")),
+        "prior_team_context_available": _safe_float(
+            team_context.get("context_available")
+        ),
+        "prior_opponent_goals_conceded_per_90": opponent_average(
+            "goals_conceded_per_90"
+        ),
+        "prior_opponent_squad_minutes": opponent_average("squad_minutes"),
+        "prior_opponent_context_available": opponent_average("context_available"),
+    }
+
+
+def aggregate_history_by_round(
+    history: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Collapse double-gameweek fixture rows into one player-week history row."""
+    sum_fields = {
+        entry["field"] for entry in ROLLING_STATS if entry.get("field") is not None
+    }
+    grouped: dict[tuple[str, int], dict[str, Any]] = {}
+    order: list[tuple[str, int]] = []
+
+    for index, entry in enumerate(history):
+        round_number = entry.get("round")
+        key = (
+            ("round", int(round_number))
+            if round_number is not None
+            else ("entry", index)
+        )
+        if key not in grouped:
+            grouped[key] = {**entry, "fixture_count": 1}
+            order.append(key)
+            continue
+
+        previous = grouped[key]
+        totals = {
+            field: _safe_float(previous.get(field)) + _safe_float(entry.get(field))
+            for field in sum_fields
+        }
+        previous.update(entry)
+        previous.update(totals)
+        previous["fixture_count"] += 1
+
+    return [grouped[key] for key in order]
 
 
 def calculate_rolling_average(values: list[float], window: int) -> float:

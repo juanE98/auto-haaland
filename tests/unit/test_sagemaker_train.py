@@ -3,15 +3,17 @@ Unit tests for SageMaker training module.
 """
 
 import json
-import tempfile
+import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
+import numpy as np
 import pandas as pd
 import pytest
 import xgboost as xgb
 
-from lambdas.common.feature_config import FEATURE_VERSION
+import sagemaker.train_local as train_local
+from lambdas.common.feature_config import FEATURE_VERSION, MODEL_V5_FEATURES
 from sagemaker import train as container_train
 from sagemaker.train_local import (
     DEFAULT_HYPERPARAMS,
@@ -19,6 +21,7 @@ from sagemaker.train_local import (
     TARGET_COL,
     _has_temporal_columns,
     _temporal_train_test_split,
+    evaluate_haul_classifier,
     evaluate_model,
     fit_haul_calibration,
     fit_point_calibration,
@@ -39,7 +42,7 @@ class TestFeatureColumns:
 
     def test_feature_cols_count(self):
         """Verify the pruned model feature contract."""
-        assert len(FEATURE_COLS) == 94
+        assert len(FEATURE_COLS) == 109
 
     def test_feature_cols_key_names(self):
         """Verify key feature column names are present."""
@@ -71,6 +74,17 @@ class TestFeatureColumns:
             "recoveries_last_5",
             "is_double_gameweek",
             "dgw_fixture_count",
+            "history_game_count",
+            "prior_points_per_90",
+            "prior_season_available",
+            "prior_ict_per_90",
+            "prior_fwd_ict_per_90",
+            "prior_team_goals_per_match",
+            "prior_team_squad_minutes",
+            "prior_team_context_available",
+            "prior_opponent_goals_conceded_per_90",
+            "prior_opponent_squad_minutes",
+            "prior_opponent_context_available",
         ]
         for col in expected_subset:
             assert col in FEATURE_COLS, f"Missing: {col}"
@@ -80,6 +94,8 @@ class TestFeatureColumns:
         assert "opponent_attack_strength" not in FEATURE_COLS
         assert "opponent_defence_strength" not in FEATURE_COLS
         assert "selected_by_percent" not in FEATURE_COLS
+        prior_ict_index = FEATURE_COLS.index("prior_ict_per_90")
+        assert FEATURE_COLS[prior_ict_index + 1] == "prior_fwd_ict_per_90"
 
     def test_target_col_name(self):
         """Verify target column name."""
@@ -89,6 +105,10 @@ class TestFeatureColumns:
         """Prevent the isolated SageMaker image from training a stale schema."""
         assert container_train.FEATURE_COLS == FEATURE_COLS
         assert container_train.FEATURE_VERSION == FEATURE_VERSION
+        assert container_train.MODEL_CONTRACT_METADATA == {
+            "feature_version": FEATURE_VERSION,
+            "feature_count": len(FEATURE_COLS),
+        }
 
 
 class TestValidateFeatures:
@@ -406,9 +426,819 @@ class TestCalibration:
             point_predictions=[3.0, 2.0, 1.0],
             haul_probabilities=[0.0, 1.0, 0.0],
             actual_points=[3.0, 5.0, 1.0],
+            gameweeks=[1, 1, 1],
             candidates=(0.0, 1.0, 3.0),
         )
         assert weight == 3.0
+
+    def test_rank_weight_uses_inference_quantisation_for_ties(self):
+        weight = select_rank_weight(
+            point_predictions=[2.004, 2.0],
+            haul_probabilities=[0.0, 0.004],
+            actual_points=[0.0, 10.0],
+            gameweeks=[1, 1],
+            candidates=(0.0, 1.0),
+        )
+
+        assert weight == 0.0
+
+
+class TestRankingMetrics:
+    def test_mean_gameweek_ndcg_scores_perfect_order_as_one(self):
+        result = train_local.mean_gameweek_ndcg(
+            actual_points=[10, 5, 1, 2, 8, 4],
+            scores=[10, 5, 1, 2, 8, 4],
+            gameweeks=[1, 1, 1, 2, 2, 2],
+            k=2,
+        )
+
+        assert result == pytest.approx(1.0)
+
+    def test_forward_haul_ndcg_uses_forward_hauls_and_skips_empty_gameweeks(self):
+        result = train_local.mean_gameweek_forward_haul_ndcg(
+            actual_points=[12, 11, 0, 11, 0],
+            scores=[2, 3, 1, 2, 1],
+            gameweeks=[1, 1, 1, 2, 2],
+            positions=[4, 3, 4, 3, 4],
+        )
+
+        assert result == pytest.approx(1 / np.log2(3))
+
+    def test_forward_haul_ndcg_scores_the_full_player_list(self):
+        result = train_local.mean_gameweek_forward_haul_ndcg(
+            actual_points=[0] * 15 + [10],
+            scores=list(range(16, 0, -1)),
+            gameweeks=[1] * 16,
+            positions=[4] * 16,
+        )
+
+        assert result == pytest.approx(1 / np.log2(17))
+
+    def test_haul_recall_at_k_is_averaged_by_gameweek(self):
+        result = train_local.haul_recall_at_k(
+            actual_points=[12, 10, 2, 11, 1, 0],
+            scores=[3, 2, 1, 1, 3, 2],
+            gameweeks=[1, 1, 1, 2, 2, 2],
+            k=1,
+        )
+
+        assert result == pytest.approx(0.25)
+
+    def test_haul_recall_at_k_uses_cohort_for_haul_denominator_only(self):
+        result = train_local.haul_recall_at_k(
+            actual_points=[12, 10, 2],
+            scores=[2, 3, 1],
+            gameweeks=[1, 1, 1],
+            k=1,
+            cohort=[True, False, True],
+        )
+
+        assert result == pytest.approx(0.0)
+
+    def test_haul_evaluation_includes_brier_score(self):
+        model = MagicMock()
+        model.predict.return_value = [0, 1, 1, 0]
+        model.predict_proba.return_value = np.array(
+            [
+                [0.9, 0.1],
+                [0.2, 0.8],
+                [0.3, 0.7],
+                [0.6, 0.4],
+            ]
+        )
+
+        metrics = evaluate_haul_classifier(
+            model,
+            pd.DataFrame({"feature": [1, 2, 3, 4]}),
+            pd.Series([0, 1, 1, 0]),
+        )
+
+        assert metrics["brier_score"] == pytest.approx(0.075)
+
+
+class TestQualityGate:
+    def test_quality_gate_uses_fresh_v4_baseline_with_identical_inputs(
+        self, monkeypatch
+    ):
+        calls = []
+
+        def train_candidate(
+            train,
+            validation,
+            completed_test,
+            outer_test,
+            feature_cols,
+            hyperparams,
+        ):
+            calls.append(
+                (
+                    train,
+                    validation,
+                    completed_test,
+                    outer_test,
+                    feature_cols,
+                    hyperparams,
+                )
+            )
+            metrics = {
+                "early_mae": 2.0,
+                "early_ndcg_at_15": 0.5,
+                "early_haul_recall_at_15": 0.4,
+                "early_fwd_haul_recall_at_15": 0.4 + 0.1 * len(calls),
+                "early_fwd_haul_ndcg": 0.4 + 0.1 * len(calls),
+                "mae": 2.0,
+                "brier_score": 0.08,
+            }
+            return metrics, {"rank_haul_weight": 1.5}
+
+        monkeypatch.setattr(train_local, "_train_quality_candidate", train_candidate)
+        frame = pd.DataFrame(
+            {
+                **{feature: [0.0] * 10 for feature in FEATURE_COLS},
+                "season": [
+                    "2021-22",
+                    "2021-22",
+                    "2022-23",
+                    "2023-24",
+                    "2024-25",
+                    "2024-25",
+                    "2025-26",
+                    "2025-26",
+                    "2026-27",
+                    "2026-27",
+                ],
+                "gameweek": [1, 4, 1, 1, 1, 4, 1, 4, 1, 2],
+                "player_id": [1] * 10,
+                "position": [4] * 10,
+                "actual_points": [2, 10, 2, 2, 2, 10, 2, 10, 2, 10],
+            }
+        )
+        hyperparams = {"n_estimators": 2, "max_depth": 2}
+
+        train_local.run_quality_gate(frame, hyperparams)
+
+        assert len(calls) == 2
+        baseline, candidate = calls
+        assert baseline[0].equals(candidate[0])
+        assert baseline[1].equals(candidate[1])
+        assert baseline[2].equals(candidate[2])
+        assert baseline[3].equals(candidate[3])
+        assert set(baseline[0]["season"]) == {"2021-22", "2022-23", "2023-24"}
+        assert set(baseline[1]["season"]) == {"2024-25"}
+        assert set(baseline[2]["season"]) == {"2025-26"}
+        assert set(baseline[3]["season"]) == {"2026-27"}
+        assert set(baseline[1]["gameweek"]) == {1, 4}
+        assert set(baseline[2]["gameweek"]) == {1, 4}
+        assert set(baseline[3]["gameweek"]) == {1, 2}
+        assert baseline[4] == [
+            feature for feature in FEATURE_COLS if feature not in MODEL_V5_FEATURES
+        ]
+        assert len(baseline[4]) == 101
+        assert candidate[4] == FEATURE_COLS
+        assert baseline[5] == candidate[5] == hyperparams
+
+    def test_quality_candidates_use_validation_for_early_stopping(self, monkeypatch):
+        regressor_params = []
+        classifier_params = []
+        real_regressor = xgb.XGBRegressor
+        real_classifier = xgb.XGBClassifier
+
+        def regressor_factory(**params):
+            regressor_params.append(params)
+            return real_regressor(**params)
+
+        def classifier_factory(**params):
+            classifier_params.append(params)
+            return real_classifier(**params)
+
+        monkeypatch.setattr(train_local.xgb, "XGBRegressor", regressor_factory)
+        monkeypatch.setattr(train_local.xgb, "XGBClassifier", classifier_factory)
+
+        rows = []
+        for season in [
+            "2021-22",
+            "2022-23",
+            "2023-24",
+            "2024-25",
+            "2025-26",
+            "2026-27",
+        ]:
+            for gameweek in range(1, 5):
+                for player_id, points in enumerate([0, 2, 10, 12], start=1):
+                    row = {feature: 0.0 for feature in FEATURE_COLS}
+                    row.update(
+                        {
+                            "season": season,
+                            "gameweek": gameweek,
+                            "player_id": player_id,
+                            "actual_points": points,
+                            "position": 4 if points >= 10 else 3,
+                        }
+                    )
+                    rows.append(row)
+
+        train_local.run_quality_gate(
+            pd.DataFrame(rows), hyperparams={"n_estimators": 2, "max_depth": 2}
+        )
+
+        assert all(params["early_stopping_rounds"] == 20 for params in regressor_params)
+        assert all(
+            params["early_stopping_rounds"] == 20 for params in classifier_params
+        )
+
+    def test_split_uses_fixed_train_validation_and_test_seasons(self):
+        frame = pd.DataFrame(
+            {
+                "season": [
+                    "2021-22",
+                    "2022-23",
+                    "2023-24",
+                    "2024-25",
+                    "2025-26",
+                    "2026-27",
+                    "2026-27",
+                ],
+                "gameweek": [1, 1, 1, 1, 1, 1, 2],
+            }
+        )
+
+        train, validation, completed_test, outer_test = (
+            train_local.split_quality_gate_seasons(frame)
+        )
+
+        assert set(train["season"]) == {"2021-22", "2022-23", "2023-24"}
+        assert set(validation["season"]) == {"2024-25"}
+        assert set(completed_test["season"]) == {"2025-26"}
+        assert set(outer_test["season"]) == {"2026-27"}
+
+    def test_split_rejects_outer_holdout_before_gameweek_two(self):
+        frame = pd.DataFrame(
+            {
+                "season": [
+                    "2021-22",
+                    "2022-23",
+                    "2023-24",
+                    "2024-25",
+                    "2025-26",
+                    "2026-27",
+                ],
+                "gameweek": [1, 1, 1, 1, 1, 1],
+            }
+        )
+
+        with pytest.raises(ValueError, match="GW1 and GW2"):
+            train_local.split_quality_gate_seasons(frame)
+
+    def test_split_rejects_missing_mandated_training_season(self):
+        frame = pd.DataFrame(
+            {
+                "season": [
+                    "2021-22",
+                    "2023-24",
+                    "2024-25",
+                    "2025-26",
+                    "2026-27",
+                    "2026-27",
+                ],
+                "gameweek": [1, 1, 1, 1, 1, 2],
+            }
+        )
+
+        with pytest.raises(ValueError, match="2021-22 through 2023-24"):
+            train_local.split_quality_gate_seasons(frame)
+
+    def test_quality_candidate_uses_outer_early_and_completed_full_metrics(
+        self, monkeypatch
+    ):
+        def frame(season, gameweeks):
+            return pd.DataFrame(
+                {
+                    "now_cost": [1.0] * len(gameweeks),
+                    "actual_points": [0, 10][: len(gameweeks)],
+                    "gameweek": gameweeks,
+                    "position": [3, 4][: len(gameweeks)],
+                    "season": [season] * len(gameweeks),
+                }
+            )
+
+        regressor = MagicMock(best_iteration=0)
+        regressor.predict.return_value = np.array([0.0, 1.0])
+        classifier = MagicMock(best_iteration=0)
+        classifier.predict_proba.return_value = np.array([[0.9, 0.1], [0.1, 0.9]])
+        monkeypatch.setattr(train_local.xgb, "XGBRegressor", lambda **_: regressor)
+        monkeypatch.setattr(train_local.xgb, "XGBClassifier", lambda **_: classifier)
+        monkeypatch.setattr(
+            train_local,
+            "fit_point_calibration",
+            lambda *_: {"point_slope": 1.0, "point_intercept": 0.0},
+        )
+        monkeypatch.setattr(
+            train_local,
+            "fit_haul_calibration",
+            lambda *_: {"haul_slope": 1.0, "haul_intercept": 0.0},
+        )
+        monkeypatch.setattr(train_local, "select_rank_weight", lambda *_: 0.0)
+        completed_metrics = {
+            "mae": 1.0,
+            "brier_score": 2.0,
+            "ndcg_at_15": 3.0,
+            "haul_recall_at_15": 4.0,
+            "early_mae": 5.0,
+            "early_ndcg_at_15": 6.0,
+            "early_haul_recall_at_15": 7.0,
+            "early_fwd_haul_recall_at_15": 8.0,
+            "early_fwd_haul_ndcg": 9.0,
+        }
+        outer_metrics = {key: value + 10 for key, value in completed_metrics.items()}
+        monkeypatch.setattr(
+            train_local,
+            "score_backtest_predictions",
+            lambda _regressor, _classifier, scored, *_: (
+                completed_metrics
+                if scored["season"].iat[0] == "2025-26"
+                else outer_metrics
+            ),
+        )
+
+        metrics, _ = train_local._train_quality_candidate(
+            frame("2021-22", [1, 2]),
+            frame("2024-25", [1, 2]),
+            frame("2025-26", [1, 4]),
+            frame("2026-27", [1, 2]),
+            ["now_cost"],
+        )
+
+        assert metrics == {
+            "mae": 1.0,
+            "brier_score": 2.0,
+            "ndcg_at_15": 3.0,
+            "haul_recall_at_15": 4.0,
+            "early_mae": 15.0,
+            "early_ndcg_at_15": 16.0,
+            "early_haul_recall_at_15": 17.0,
+            "early_fwd_haul_recall_at_15": 18.0,
+            "early_fwd_haul_ndcg": 19.0,
+        }
+        regressor.fit.assert_called_once()
+        classifier.fit.assert_called_once()
+
+    def test_quality_gate_applies_balanced_release_thresholds(self):
+        baseline = {
+            "early_mae": 2.0,
+            "early_ndcg_at_15": 0.50,
+            "early_haul_recall_at_15": 0.40,
+            "early_fwd_haul_recall_at_15": 0.40,
+            "early_fwd_haul_ndcg": 0.50,
+            "mae": 2.0,
+            "brier_score": 0.08,
+        }
+        candidate = {
+            "early_mae": 2.05,
+            "early_ndcg_at_15": 0.51,
+            "early_haul_recall_at_15": 0.41,
+            "early_fwd_haul_recall_at_15": 0.40,
+            "early_fwd_haul_ndcg": 0.51,
+            "mae": 2.02,
+            "brier_score": 0.082,
+        }
+
+        result = train_local.evaluate_quality_gates(baseline, candidate)
+
+        assert result["passed"] is True
+        assert all(result["checks"].values())
+        assert result["checks"]["early_fwd_haul_recall_non_regression"] is True
+        assert result["checks"]["early_fwd_haul_ndcg_improved"] is True
+
+    def test_quality_gate_rejects_early_ranking_regression(self):
+        baseline = {
+            "early_mae": 2.0,
+            "early_ndcg_at_15": 0.50,
+            "early_haul_recall_at_15": 0.40,
+            "early_fwd_haul_recall_at_15": 0.40,
+            "early_fwd_haul_ndcg": 0.50,
+            "mae": 2.0,
+            "brier_score": 0.08,
+        }
+        candidate = {**baseline, "early_ndcg_at_15": 0.49}
+
+        result = train_local.evaluate_quality_gates(baseline, candidate)
+
+        assert result["passed"] is False
+        assert result["checks"]["early_ndcg_improved"] is False
+
+    def test_quality_gate_rejects_early_forward_haul_recall_regression(self):
+        baseline = {
+            "early_mae": 2.0,
+            "early_ndcg_at_15": 0.50,
+            "early_haul_recall_at_15": 0.40,
+            "early_fwd_haul_recall_at_15": 0.40,
+            "early_fwd_haul_ndcg": 0.50,
+            "mae": 2.0,
+            "brier_score": 0.08,
+        }
+        candidate = {**baseline, "early_fwd_haul_recall_at_15": 0.39}
+
+        result = train_local.evaluate_quality_gates(baseline, candidate)
+
+        assert result["passed"] is False
+        assert result["checks"]["early_fwd_haul_recall_non_regression"] is False
+
+    def test_quality_gate_requires_forward_haul_ndcg_improvement(self):
+        baseline = {
+            "early_mae": 2.0,
+            "early_ndcg_at_15": 0.50,
+            "early_haul_recall_at_15": 0.40,
+            "early_fwd_haul_recall_at_15": 0.40,
+            "early_fwd_haul_ndcg": 0.50,
+            "mae": 2.0,
+            "brier_score": 0.08,
+        }
+        candidate = {
+            **baseline,
+            "early_ndcg_at_15": 0.51,
+            "early_haul_recall_at_15": 0.41,
+        }
+
+        result = train_local.evaluate_quality_gates(baseline, candidate)
+
+        assert result["passed"] is False
+        assert result["checks"]["early_fwd_haul_ndcg_improved"] is False
+
+    def test_score_backtest_predictions_reports_early_and_full_metrics(self):
+        regressor = MagicMock()
+        regressor.predict.return_value = np.array([1.0, 3.0, 2.0, 4.0])
+        classifier = MagicMock()
+        classifier.predict_proba.return_value = np.array(
+            [[0.9, 0.1], [0.2, 0.8], [0.7, 0.3], [0.1, 0.9]]
+        )
+        frame = pd.DataFrame(
+            {
+                **{feature: [0.0] * 4 for feature in FEATURE_COLS},
+                "actual_points": [0, 10, 2, 12],
+                "gameweek": [1, 1, 4, 4],
+                "position": [3, 4, 3, 4],
+            }
+        )
+        metadata = {
+            "point_slope": 1.0,
+            "point_intercept": 0.0,
+            "haul_slope": 1.0,
+            "haul_intercept": 0.0,
+            "rank_haul_weight": 1.0,
+        }
+
+        result = train_local.score_backtest_predictions(
+            regressor,
+            classifier,
+            frame,
+            FEATURE_COLS,
+            metadata,
+        )
+
+        assert result["mae"] == pytest.approx(4.0)
+        assert result["early_mae"] == pytest.approx(4.0)
+        assert 0 <= result["ndcg_at_15"] <= 1
+        assert 0 <= result["early_haul_recall_at_15"] <= 1
+        assert result["early_fwd_haul_recall_at_15"] == pytest.approx(1.0)
+        assert result["early_fwd_haul_ndcg"] == pytest.approx(1.0)
+
+    def test_backtest_top_fifteen_uses_inference_quantisation_at_boundary(self):
+        player_count = 16
+        regressor = MagicMock()
+        regressor.predict.return_value = np.array([2.004] * 15 + [2.0001], dtype=float)
+        classifier = MagicMock()
+        probabilities = np.array([0.0] * 15 + [0.004], dtype=float)
+        classifier.predict_proba.return_value = np.column_stack(
+            [1 - probabilities, probabilities]
+        )
+        frame = pd.DataFrame(
+            {
+                **{feature: [0.0] * player_count for feature in FEATURE_COLS},
+                "actual_points": [0.0] * 15 + [10.0],
+                "gameweek": [1] * player_count,
+                "position": [3] * 15 + [4],
+            }
+        )
+
+        result = train_local.score_backtest_predictions(
+            regressor,
+            classifier,
+            frame,
+            FEATURE_COLS,
+            {
+                "point_slope": 1.0,
+                "point_intercept": 0.0,
+                "haul_slope": 1.0,
+                "haul_intercept": 0.0,
+                "rank_haul_weight": 1.0,
+            },
+        )
+
+        assert result["early_haul_recall_at_15"] == 0.0
+
+    def test_quality_gate_compares_baseline_and_candidate_models(self):
+        rows = []
+        for season in [
+            "2021-22",
+            "2022-23",
+            "2023-24",
+            "2024-25",
+            "2025-26",
+            "2026-27",
+        ]:
+            for gameweek in range(1, 5):
+                for player_id, points in enumerate([0, 2, 10, 12], start=1):
+                    row = {feature: 0.0 for feature in FEATURE_COLS}
+                    row.update(
+                        {
+                            "season": season,
+                            "gameweek": gameweek,
+                            "player_id": player_id,
+                            "actual_points": points,
+                            "position": 4 if points >= 10 else 3,
+                            "now_cost": float(player_id),
+                            "prior_points_per_90": float(points),
+                        }
+                    )
+                    rows.append(row)
+
+        result = train_local.run_quality_gate(
+            pd.DataFrame(rows), hyperparams={"n_estimators": 2, "max_depth": 2}
+        )
+
+        assert set(result) == {"passed", "checks", "baseline", "candidate"}
+        assert "early_ndcg_at_15" in result["baseline"]
+        assert "early_fwd_haul_recall_at_15" in result["baseline"]
+        assert "early_fwd_haul_ndcg" in result["baseline"]
+        assert "metadata" in result["candidate"]
+        assert result["candidate"]["metadata"]["regression_n_estimators"] > 0
+        assert result["candidate"]["metadata"]["classifier_n_estimators"] > 0
+
+
+class TestMainQualityGate:
+    @staticmethod
+    def passing_report():
+        return {
+            "passed": True,
+            "checks": {"early_ndcg_improved": True},
+            "baseline": {},
+            "candidate": {
+                "metadata": {
+                    "point_slope": 1.0,
+                    "point_intercept": 0.0,
+                    "haul_slope": 1.0,
+                    "haul_intercept": 0.0,
+                    "rank_haul_weight": 1.0,
+                    "regression_n_estimators": 2,
+                    "classifier_n_estimators": 2,
+                }
+            },
+        }
+
+    def test_passing_gate_only_writes_report_without_training_or_saving(
+        self, monkeypatch, tmp_path
+    ):
+        report = self.passing_report()
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "train_local.py",
+                "--data-path",
+                "training.parquet",
+                "--output-path",
+                str(tmp_path),
+                "--quality-gate",
+                "--train-haul-classifier",
+                "--upload-s3",
+            ],
+        )
+        monkeypatch.setattr(
+            train_local, "load_training_data", lambda **_: pd.DataFrame()
+        )
+        monkeypatch.setattr(train_local, "run_quality_gate", lambda *_: report)
+        for name in (
+            "train_model_temporal",
+            "train_model",
+            "save_model",
+            "train_haul_classifier",
+            "save_model_metadata",
+            "upload_model_to_s3",
+        ):
+            monkeypatch.setattr(
+                train_local,
+                name,
+                MagicMock(side_effect=AssertionError(f"{name} must not run")),
+            )
+
+        train_local.main()
+
+        assert json.loads((tmp_path / "quality_report.json").read_text()) == report
+
+    def test_failed_gate_still_writes_report_and_exits(self, monkeypatch, tmp_path):
+        report = self.passing_report()
+        report["passed"] = False
+        report["checks"]["early_ndcg_improved"] = False
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "train_local.py",
+                "--data-path",
+                "training.parquet",
+                "--output-path",
+                str(tmp_path),
+                "--quality-gate",
+            ],
+        )
+        monkeypatch.setattr(
+            train_local, "load_training_data", lambda **_: pd.DataFrame()
+        )
+        monkeypatch.setattr(train_local, "run_quality_gate", lambda *_: report)
+        monkeypatch.setattr(
+            train_local,
+            "train_model_temporal",
+            MagicMock(side_effect=AssertionError("training must not run")),
+        )
+
+        with pytest.raises(SystemExit, match="early_ndcg_improved"):
+            train_local.main()
+
+        assert json.loads((tmp_path / "quality_report.json").read_text()) == report
+
+    def test_quality_gate_rejects_non_canonical_haul_threshold(
+        self, monkeypatch, capsys
+    ):
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "train_local.py",
+                "--data-path",
+                "training.parquet",
+                "--quality-gate",
+                "--haul-threshold",
+                "12",
+            ],
+        )
+        monkeypatch.setattr(
+            train_local,
+            "load_training_data",
+            MagicMock(side_effect=AssertionError("data must not be loaded")),
+        )
+
+        with pytest.raises(SystemExit) as error:
+            train_local.main()
+
+        assert error.value.code == 2
+        assert "--quality-gate requires --haul-threshold 10" in capsys.readouterr().err
+
+    def test_passing_gate_with_refit_trains_and_saves_release_models(
+        self, monkeypatch, tmp_path
+    ):
+        seasons = [
+            "2021-22",
+            "2022-23",
+            "2023-24",
+            "2024-25",
+            "2025-26",
+            "2026-27",
+            "2026-27",
+        ]
+        frame = pd.DataFrame(
+            {
+                **{feature: [0.0] * len(seasons) for feature in FEATURE_COLS},
+                "actual_points": [10] * len(seasons),
+                "season": seasons,
+                "gameweek": [1, 1, 1, 1, 1, 1, 2],
+                "player_id": list(range(1, len(seasons) + 1)),
+            }
+        )
+        frame["now_cost"] = [1, 2, 3, 4, 5, 90, 91]
+        regressor = MagicMock()
+        regressor.predict.return_value = np.array([10.0] * 5)
+        classifier = MagicMock()
+        classifier.predict_proba.return_value = np.array([[0.1, 0.9]] * 5)
+        classifier_params = []
+        gated_hyperparams = {}
+        save_model = MagicMock(return_value=str(tmp_path / "model.xgb"))
+        save_metadata = MagicMock(return_value=str(tmp_path / "model_metadata.json"))
+
+        def run_quality_gate(_, hyperparams):
+            gated_hyperparams.update(hyperparams)
+            return self.passing_report()
+
+        def classifier_factory(**params):
+            classifier_params.append(params)
+            return classifier
+
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "train_local.py",
+                "--data-path",
+                "training.parquet",
+                "--output-path",
+                str(tmp_path),
+                "--quality-gate",
+                "--refit-all",
+                "--train-haul-classifier",
+                "--n-estimators",
+                "17",
+                "--max-depth",
+                "3",
+                "--learning-rate",
+                "0.07",
+            ],
+        )
+        monkeypatch.setattr(train_local, "load_training_data", lambda **_: frame)
+        monkeypatch.setattr(train_local, "run_quality_gate", run_quality_gate)
+        monkeypatch.setattr(train_local.xgb, "XGBRegressor", lambda **_: regressor)
+        monkeypatch.setattr(train_local.xgb, "XGBClassifier", classifier_factory)
+        monkeypatch.setattr(train_local, "evaluate_model", lambda *_: {"mae": 0.0})
+        monkeypatch.setattr(train_local, "get_feature_importance", lambda *_: {})
+        monkeypatch.setattr(
+            train_local, "evaluate_haul_classifier", lambda *_: {"roc_auc": 1.0}
+        )
+        monkeypatch.setattr(train_local, "save_model", save_model)
+        monkeypatch.setattr(train_local, "save_model_metadata", save_metadata)
+
+        train_local.main()
+
+        regressor.fit.assert_called_once()
+        classifier.fit.assert_called_once()
+        assert list(regressor.fit.call_args.args[0]["now_cost"]) == [1, 2, 3, 4, 5]
+        assert list(classifier.fit.call_args.args[0]["now_cost"]) == [1, 2, 3, 4, 5]
+        assert gated_hyperparams == {
+            "n_estimators": 17,
+            "max_depth": 3,
+            "learning_rate": 0.07,
+        }
+        assert classifier_params == [
+            {
+                **train_local.HAUL_CLASSIFIER_HYPERPARAMS,
+                "n_estimators": 2,
+                "max_depth": 3,
+                "learning_rate": 0.07,
+            }
+        ]
+        save_model.assert_called_once()
+        save_metadata.assert_called_once()
+        assert save_metadata.call_args.args[0]["trained_through"] == "2025-26"
+
+    def test_quality_gate_tuning_excludes_outer_holdout(self, monkeypatch, tmp_path):
+        seasons = [
+            "2021-22",
+            "2022-23",
+            "2023-24",
+            "2024-25",
+            "2025-26",
+            "2026-27",
+            "2026-27",
+        ]
+        frame = pd.DataFrame(
+            {
+                **{feature: [0.0] * len(seasons) for feature in FEATURE_COLS},
+                "actual_points": [2] * len(seasons),
+                "season": seasons,
+                "gameweek": [1, 1, 1, 1, 1, 1, 2],
+                "player_id": list(range(1, len(seasons) + 1)),
+            }
+        )
+        tuned_seasons = []
+
+        def tune(frame_to_tune, **_):
+            tuned_seasons.extend(frame_to_tune["season"])
+            return DEFAULT_HYPERPARAMS
+
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "train_local.py",
+                "--data-path",
+                "training.parquet",
+                "--output-path",
+                str(tmp_path),
+                "--quality-gate",
+                "--tune",
+            ],
+        )
+        monkeypatch.setattr(train_local, "load_training_data", lambda **_: frame)
+        monkeypatch.setattr(train_local, "tune_hyperparameters", tune)
+        monkeypatch.setattr(
+            train_local, "run_quality_gate", lambda *_: self.passing_report()
+        )
+
+        train_local.main()
+
+        assert set(tuned_seasons) == {
+            "2021-22",
+            "2022-23",
+            "2023-24",
+            "2024-25",
+        }
 
 
 class TestTemporalHelpers:

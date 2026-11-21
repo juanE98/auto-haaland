@@ -102,6 +102,7 @@ config.local.*
 *.pkl
 *.model
 models/model_metadata.json
+models/quality_report.json
 
 # Data files (will be in S3)
 data/

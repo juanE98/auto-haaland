@@ -45,7 +45,11 @@ from lambdas.common.feature_config import (  # noqa: E402
     BOOTSTRAP_FEATURES,
     FEATURE_COLS,
     compute_derived_features,
+    compute_prior_features,
+    compute_prior_fwd_ict_per_90,
+    compute_prior_team_context,
     compute_rolling_features,
+    get_prior_team_features,
 )
 
 logging.basicConfig(
@@ -54,9 +58,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Base URL for vaastav/Fantasy-Premier-League GitHub repo raw files
+# Immutable vaastav/Fantasy-Premier-League source revision for reproducible imports
 GITHUB_RAW_BASE = (
-    "https://raw.githubusercontent.com/vaastav/Fantasy-Premier-League/master/data"
+    "https://raw.githubusercontent.com/vaastav/Fantasy-Premier-League/"
+    "9779cdbc0c07f6c900c2d0c181ddf6bb9c800f88/data"
 )
 
 # Mapping from position string to numeric element_type
@@ -100,6 +105,10 @@ def aggregate_gameweek_rows(gw_df: pd.DataFrame) -> pd.DataFrame:
         result = gw_df.copy()
         if "fixture_count" not in result.columns:
             result["fixture_count"] = 1
+        if "opponent_team" in result.columns and "opponent_team_ids" not in result:
+            result["opponent_team_ids"] = result["opponent_team"].map(
+                lambda opponent: [int(opponent)] if pd.notna(opponent) else []
+            )
         return result
 
     aggregations = {
@@ -110,6 +119,13 @@ def aggregate_gameweek_rows(gw_df: pd.DataFrame) -> pd.DataFrame:
     grouped = gw_df.groupby(player_key, as_index=False, sort=False).agg(aggregations)
     fixture_counts = gw_df.groupby(player_key).size()
     grouped["fixture_count"] = grouped[player_key].map(fixture_counts)
+    if "opponent_team" in gw_df.columns:
+        opponent_team_ids = gw_df.groupby(player_key)["opponent_team"].agg(
+            lambda opponents: [
+                int(opponent) for opponent in opponents if pd.notna(opponent)
+            ]
+        )
+        grouped["opponent_team_ids"] = grouped[player_key].map(opponent_team_ids)
     return grouped
 
 
@@ -183,6 +199,48 @@ def fetch_teams_csv(season: str) -> pd.DataFrame | None:
     return fetch_csv(url)
 
 
+def fetch_players_raw_csv(season: str) -> pd.DataFrame | None:
+    """Fetch the end-of-season player table used for stable player codes."""
+    return fetch_csv(f"{GITHUB_RAW_BASE}/{season}/players_raw.csv")
+
+
+def previous_season(season: str) -> str:
+    """Return the Vaastav season immediately preceding ``season``."""
+    start_year = int(season.split("-", 1)[0]) - 1
+    return f"{start_year}-{str(start_year + 1)[-2:]}"
+
+
+def build_prior_feature_map(
+    current_players: pd.DataFrame,
+    previous_players: pd.DataFrame,
+) -> dict[int, dict[str, float]]:
+    """Map current player IDs to previous-season features using stable codes."""
+    summaries = build_prior_summary_map(current_players, previous_players)
+    return {
+        player_id: compute_prior_features(summary["history_past"])
+        for player_id, summary in summaries.items()
+    }
+
+
+def build_prior_summary_map(
+    current_players: pd.DataFrame,
+    previous_players: pd.DataFrame,
+) -> dict[int, dict[str, list[dict]]]:
+    """Map prior records to current player IDs using stable player codes."""
+    previous_by_code = {
+        int(row["code"]): row.to_dict()
+        for _, row in previous_players.iterrows()
+        if pd.notna(row.get("code"))
+    }
+    summaries = {}
+    for _, row in current_players.iterrows():
+        player_id = int(row["id"])
+        code = int(row["code"]) if pd.notna(row.get("code")) else None
+        prior = previous_by_code.get(code)
+        summaries[player_id] = {"history_past": [prior] if prior else []}
+    return summaries
+
+
 def build_team_strength_map(teams_df: pd.DataFrame) -> dict[int, int]:
     """
     Build a mapping from team ID to strength rating.
@@ -252,6 +310,46 @@ def build_team_name_map(teams_df: pd.DataFrame) -> dict[str, int]:
     return name_map
 
 
+def get_gameweek_player_team_ids(
+    gw_df: pd.DataFrame,
+    team_name_to_id: dict[str, int] | None = None,
+) -> dict[int, int]:
+    """Return the player-to-team roster recorded in a gameweek CSV."""
+    teams_by_player: dict[int, set[int]] = {}
+    unresolved_players = set()
+    for _, row in gw_df.iterrows():
+        if pd.isna(row.get("element")):
+            continue
+        player_id = int(row["element"])
+        team_raw = row.get("team", row.get("team_id"))
+        try:
+            team_id = (
+                (team_name_to_id or {}).get(team_raw)
+                if isinstance(team_raw, str)
+                else int(team_raw)
+            )
+        except (TypeError, ValueError):
+            team_id = None
+        if not team_id:
+            unresolved_players.add(player_id)
+            continue
+        teams_by_player.setdefault(player_id, set()).add(team_id)
+
+    player_team_ids = {}
+    for player_id in teams_by_player.keys() | unresolved_players:
+        team_ids = teams_by_player.get(player_id, set())
+        if player_id in unresolved_players:
+            logger.warning(
+                "Could not reconstruct team for player %s from gameweek CSV",
+                player_id,
+            )
+        elif len(team_ids) != 1:
+            logger.warning("Conflicting gameweek teams for player %s", player_id)
+        else:
+            player_team_ids[player_id] = team_ids.pop()
+    return player_team_ids
+
+
 def engineer_historical_features(
     gw_df: pd.DataFrame,
     gameweek: int,
@@ -259,6 +357,9 @@ def engineer_historical_features(
     team_strength_map: dict[int, int],
     team_name_to_id: dict[str, int] | None = None,
     team_attack_defence_map: dict[int, dict[str, int]] | None = None,
+    prior_features_by_player_id: dict[int, dict[str, float]] | None = None,
+    prior_team_context: dict[int, dict[str, float]] | None = None,
+    player_team_ids: dict[int, int] | None = None,
 ) -> pd.DataFrame:
     """
     Engineer training features from a single gameweek's data.
@@ -280,6 +381,8 @@ def engineer_historical_features(
     """
     features = []
     gw_df = aggregate_gameweek_rows(gw_df)
+    if player_team_ids is None:
+        player_team_ids = get_gameweek_player_team_ids(gw_df, team_name_to_id)
 
     for _, row in gw_df.iterrows():
         player_name = str(row.get("name", ""))
@@ -335,11 +438,9 @@ def engineer_historical_features(
         actual_points = int(row.get("total_points", 0))
 
         # Team ID (vaastav GW CSVs use team name strings, not numeric IDs)
-        team_raw = row.get("team", row.get("team_id", 0))
-        if isinstance(team_raw, str) and team_name_to_id:
-            team_id = team_name_to_id.get(team_raw, 0)
-        else:
-            team_id = int(team_raw)
+        team_id = player_team_ids.get(player_id)
+        if team_id is None:
+            continue
 
         # Position (vaastav GW CSVs use strings like "DEF", "FWD", etc.)
         pos_raw = row.get("element_type", row.get("position", 0))
@@ -363,6 +464,22 @@ def engineer_historical_features(
 
         # Derived features
         derived = compute_derived_features(history, rolling, static)
+        early_season = {
+            "history_game_count": float(min(len(history), 10)),
+            **compute_prior_features([]),
+            **(prior_features_by_player_id or {}).get(player_id, {}),
+        }
+        early_season["prior_fwd_ict_per_90"] = compute_prior_fwd_ict_per_90(
+            early_season["prior_ict_per_90"], position
+        )
+        opponent_team_ids = row.get("opponent_team_ids", [])
+        if not isinstance(opponent_team_ids, list):
+            opponent_team_ids = []
+        if not opponent_team_ids and opponent_team:
+            opponent_team_ids = [opponent_team]
+        prior_team_features = get_prior_team_features(
+            prior_team_context or {}, team_id, opponent_team_ids
+        )
 
         # Bootstrap features (default values for historical data)
         # These aren't available from vaastav CSV data, so use sensible defaults
@@ -406,6 +523,8 @@ def engineer_historical_features(
         feature_row.update(position_feats)
         feature_row.update(interaction_feats)
         feature_row.update(derived)
+        feature_row.update(early_season)
+        feature_row.update(prior_team_features)
         feature_row["actual_points"] = actual_points
 
         features.append(feature_row)
@@ -425,7 +544,7 @@ def engineer_historical_features(
 def process_season(
     season: str,
     output_dir: str,
-    min_gameweek: int = 4,
+    min_gameweek: int = 1,
     max_gameweek: int = 38,
 ) -> list[str]:
     """
@@ -459,6 +578,17 @@ def process_season(
     team_attack_defence_map = build_team_attack_defence_map(teams_df)
     logger.info(f"Built team strength map with {len(team_strength_map)} teams")
 
+    current_players = fetch_players_raw_csv(season)
+    prior_players = fetch_players_raw_csv(previous_season(season))
+    prior_summary_map = (
+        build_prior_summary_map(current_players, prior_players)
+        if current_players is not None and prior_players is not None
+        else {}
+    )
+    prior_feature_map = {
+        player_id: compute_prior_features(summary["history_past"])
+        for player_id, summary in prior_summary_map.items()
+    }
     # Fetch all gameweek CSVs
     logger.info(f"Fetching gameweek CSVs for {season}...")
     gw_data: dict[int, pd.DataFrame] = {}
@@ -485,7 +615,11 @@ def process_season(
     output_files = []
 
     for gw in sorted(gw_data.keys()):
+        player_team_ids = get_gameweek_player_team_ids(gw_data[gw], team_name_to_id)
         gw_df = aggregate_gameweek_rows(gw_data[gw])
+        prior_team_context = compute_prior_team_context(
+            player_team_ids, prior_summary_map
+        )
 
         if gw >= min_gameweek:
             # Engineer features using accumulated history
@@ -496,6 +630,9 @@ def process_season(
                 team_strength_map,
                 team_name_to_id,
                 team_attack_defence_map,
+                prior_feature_map,
+                prior_team_context,
+                player_team_ids,
             )
 
             if len(features_df) > 0:
@@ -620,8 +757,8 @@ def main():
     parser.add_argument(
         "--min-gameweek",
         type=int,
-        default=4,
-        help="First gameweek to generate training rows for (default: 4)",
+        default=1,
+        help="First gameweek to generate training rows for (default: 1)",
     )
     parser.add_argument(
         "--max-gameweek",

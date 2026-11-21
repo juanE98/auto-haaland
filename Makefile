@@ -1,4 +1,4 @@
-.PHONY: setup install test test-unit test-integration local-up local-down local-api local-logs clean help import-historical backfill archive-predictions train-local train-and-upload tune top haul player compare predictions run-pipeline lint format deploy-prod
+.PHONY: setup install test test-unit test-integration local-up local-down local-api local-logs clean help import-historical backfill archive-predictions quality-gate train-local train-and-upload tune top haul player compare predictions run-pipeline lint format deploy-prod
 
 # Environment: dev (default) or prod
 ENV ?= dev
@@ -34,7 +34,8 @@ help:
 	@echo "  make import-historical - Import historical data from GitHub"
 	@echo "  make backfill          - Backfill current season from FPL API"
 	@echo "  make archive-predictions - Archive DynamoDB to S3 without deleting"
-	@echo "  make train-local       - Train XGBoost model locally (temporal split)"
+	@echo "  make train-local       - Gate and refit release models locally"
+	@echo "  make quality-gate      - Backtest early-season model against baseline"
 	@echo "  make train-and-upload  - Train locally and upload model to S3"
 	@echo "  make tune              - Tune hyperparameters with Optuna"
 	@echo ""
@@ -110,17 +111,21 @@ backfill:
 archive-predictions:
 	venv/bin/python scripts/reset_predictions.py --table fpl-predictions-$(ENV) --bucket fpl-ml-data-$(ENV) --season $(ARCHIVE_SEASON)
 
+quality-gate:
+	@echo "Running fixed-season model quality gate..."
+	venv/bin/python sagemaker/train_local.py --data-dir data/ --output-path models/ --quality-gate --train-haul-classifier
+
 train-local:
-	@echo "Training models locally (temporal split)..."
-	venv/bin/python sagemaker/train_local.py --data-dir data/ --output-path models/ --temporal-split --train-haul-classifier
+	@echo "Training release models locally after quality gate..."
+	venv/bin/python sagemaker/train_local.py --data-dir data/ --output-path models/ --quality-gate --refit-all --train-haul-classifier
 
 tune:
 	@echo "Tuning hyperparameters with Optuna..."
-	venv/bin/python sagemaker/train_local.py --data-dir data/ --output-path models/ --temporal-split --tune --n-trials $(or $(N_TRIALS),50) --train-haul-classifier
+	venv/bin/python sagemaker/train_local.py --data-dir data/ --output-path models/ --quality-gate --refit-all --tune --n-trials $(or $(N_TRIALS),50) --train-haul-classifier
 
 train-and-upload:
 	@echo "Training models and uploading to S3 ($(ENV))..."
-	venv/bin/python sagemaker/train_local.py --data-dir data/ --output-path models/ --temporal-split --upload-s3 --bucket fpl-ml-data-$(ENV) --train-haul-classifier
+	venv/bin/python sagemaker/train_local.py --data-dir data/ --output-path models/ --quality-gate --refit-all --upload-s3 --bucket fpl-ml-data-$(ENV) --train-haul-classifier
 
 API_ENDPOINT ?= $(shell aws ssm get-parameter --name /auto-haaland/$(ENV)/api-endpoint --query Parameter.Value --output text --region ap-southeast-2 2>/dev/null)
 STATE_MACHINE_ARN ?= $(shell aws ssm get-parameter --name /auto-haaland/$(ENV)/state-machine-arn --query Parameter.Value --output text --region ap-southeast-2 2>/dev/null)

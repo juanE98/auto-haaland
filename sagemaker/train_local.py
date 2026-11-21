@@ -26,9 +26,11 @@ import xgboost as xgb
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
     accuracy_score,
+    brier_score_loss,
     f1_score,
     mean_absolute_error,
     mean_squared_error,
+    ndcg_score,
     precision_score,
     r2_score,
     recall_score,
@@ -42,7 +44,12 @@ project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 sys.path.insert(0, str(project_root / "lambdas"))
 
-from lambdas.common.feature_config import FEATURE_COLS, TARGET_COL  # noqa: E402
+from lambdas.common.feature_config import (  # noqa: E402
+    FEATURE_COLS,
+    FEATURE_VERSION,
+    MODEL_V5_FEATURES,
+    TARGET_COL,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -61,6 +68,8 @@ DEFAULT_HYPERPARAMS = {
     "random_state": 42,
 }
 
+QUALITY_EARLY_STOPPING_ROUNDS = 20
+
 # Default hyperparameters for haul classifier
 HAUL_CLASSIFIER_HYPERPARAMS = {
     "objective": "binary:logistic",
@@ -75,6 +84,56 @@ HAUL_CLASSIFIER_HYPERPARAMS = {
 
 # Haul threshold (10+ points is considered a haul)
 HAUL_THRESHOLD = 10
+
+QUALITY_TRAIN_SEASONS = {"2021-22", "2022-23", "2023-24"}
+QUALITY_VALIDATION_SEASON = "2024-25"
+QUALITY_COMPLETED_TEST_SEASON = "2025-26"
+QUALITY_OUTER_TEST_SEASON = "2026-27"
+
+
+def split_quality_gate_seasons(
+    df: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Split training, validation, completed-test, and outer-test seasons."""
+    train = df[df["season"].isin(QUALITY_TRAIN_SEASONS)].copy()
+    validation = df[df["season"] == QUALITY_VALIDATION_SEASON].copy()
+    completed_test = df[df["season"] == QUALITY_COMPLETED_TEST_SEASON].copy()
+    outer_test = df[df["season"] == QUALITY_OUTER_TEST_SEASON].copy()
+    if set(train["season"]) != QUALITY_TRAIN_SEASONS:
+        raise ValueError(
+            "Quality gate requires every season from 2021-22 through 2023-24"
+        )
+    if validation.empty or completed_test.empty or outer_test.empty:
+        raise ValueError("Quality gate requires 2021-22 through 2026-27 data")
+    if not {1, 2}.issubset(set(outer_test["gameweek"])):
+        raise ValueError("2026-27 outer holdout must contain both GW1 and GW2")
+    return train, validation, completed_test, outer_test
+
+
+def evaluate_quality_gates(
+    baseline: dict[str, float], candidate: dict[str, float]
+) -> dict:
+    """Evaluate the approved balanced early-season release thresholds."""
+    tolerance = 1e-12
+    checks = {
+        "early_ndcg_improved": candidate["early_ndcg_at_15"]
+        > baseline["early_ndcg_at_15"],
+        "early_haul_recall_improved": candidate["early_haul_recall_at_15"]
+        > baseline["early_haul_recall_at_15"],
+        "early_fwd_haul_recall_non_regression": (
+            candidate["early_fwd_haul_recall_at_15"]
+            >= baseline["early_fwd_haul_recall_at_15"] - tolerance
+        ),
+        "early_fwd_haul_ndcg_improved": candidate["early_fwd_haul_ndcg"]
+        > baseline["early_fwd_haul_ndcg"],
+        "early_mae_within_tolerance": candidate["early_mae"]
+        <= baseline["early_mae"] + 0.05 + tolerance,
+        "full_mae_within_tolerance": candidate["mae"]
+        <= baseline["mae"] + 0.02 + tolerance,
+        "brier_within_tolerance": candidate["brier_score"]
+        <= baseline["brier_score"] + 0.002 + tolerance,
+    }
+    return {"passed": all(checks.values()), "checks": checks}
 
 
 def fit_point_calibration(predictions, actual_points) -> dict[str, float]:
@@ -104,21 +163,94 @@ def fit_haul_calibration(probabilities, outcomes) -> dict[str, float]:
     }
 
 
+def mean_gameweek_ndcg(actual_points, scores, gameweeks, k: int | None = 15) -> float:
+    """Return mean NDCG@k across gameweeks with positive relevance."""
+    frame = pd.DataFrame(
+        {"actual": actual_points, "score": scores, "gameweek": gameweeks}
+    )
+    values = []
+    for _, group in frame.groupby("gameweek", sort=False):
+        relevance = np.clip(group["actual"].to_numpy(dtype=float), 0, None)
+        if relevance.sum() == 0:
+            continue
+        values.append(
+            ndcg_score(
+                [relevance],
+                [group["score"].to_numpy(dtype=float)],
+                k=min(k, len(group)) if k is not None else None,
+            )
+        )
+    return float(np.mean(values)) if values else 0.0
+
+
+def mean_gameweek_forward_haul_ndcg(
+    actual_points, scores, gameweeks, positions
+) -> float:
+    """Return full-list mean NDCG for forward hauls by gameweek."""
+    actual = np.asarray(actual_points, dtype=float)
+    relevance = np.where(
+        (np.asarray(positions) == 4) & (actual >= HAUL_THRESHOLD), actual, 0
+    )
+    return mean_gameweek_ndcg(relevance, scores, gameweeks, k=None)
+
+
+def haul_recall_at_k(
+    actual_points,
+    scores,
+    gameweeks,
+    k: int = 15,
+    haul_threshold: int = HAUL_THRESHOLD,
+    cohort=None,
+) -> float:
+    """Return mean per-gameweek recall of actual hauls in the top k scores."""
+    frame = pd.DataFrame(
+        {"actual": actual_points, "score": scores, "gameweek": gameweeks}
+    )
+    if cohort is not None:
+        frame["cohort"] = cohort
+    recalls = []
+    for _, group in frame.groupby("gameweek", sort=False):
+        hauls = group["actual"] >= haul_threshold
+        if cohort is not None:
+            hauls &= group["cohort"]
+        haul_count = int(hauls.sum())
+        if haul_count == 0:
+            continue
+        top = group.nlargest(k, "score")
+        top_hauls = top["actual"] >= haul_threshold
+        if cohort is not None:
+            top_hauls &= top["cohort"]
+        recalls.append(float(top_hauls.sum() / haul_count))
+    return float(np.mean(recalls)) if recalls else 0.0
+
+
+def inference_rank_scores(point_predictions, haul_probabilities, weight):
+    """Apply the same probability and score quantisation used by inference."""
+    points = np.asarray(point_predictions, dtype=float)
+    haul_percentages = (np.asarray(haul_probabilities, dtype=float) * 100).round(1)
+    return (points + haul_percentages * weight / 100).round(2)
+
+
 def select_rank_weight(
     point_predictions,
     haul_probabilities,
     actual_points,
+    gameweeks=None,
     candidates=(0.0, 0.5, 1.0, 1.5, 2.0),
 ) -> float:
-    """Select the haul weight with the best validation rank correlation."""
+    """Select the haul weight with the best validation mean NDCG@15."""
     points = np.asarray(point_predictions, dtype=float)
     haul = np.asarray(haul_probabilities, dtype=float)
-    actual_ranks = pd.Series(actual_points).rank().to_numpy()
+    if gameweeks is None:
+        gameweeks = np.zeros(len(points), dtype=int)
     best_weight = float(candidates[0])
     best_score = float("-inf")
     for weight in candidates:
-        score_ranks = pd.Series(points + haul * weight).rank().to_numpy()
-        score = float(np.corrcoef(score_ranks, actual_ranks)[0, 1])
+        score = mean_gameweek_ndcg(
+            actual_points,
+            inference_rank_scores(points, haul, weight),
+            gameweeks,
+        )
         if score > best_score:
             best_score = score
             best_weight = float(weight)
@@ -134,7 +266,165 @@ def apply_haul_calibration(probabilities, metadata: dict[str, float]):
     )
 
 
-def save_model_metadata(metadata: dict[str, float], output_path: str) -> str:
+def score_backtest_predictions(
+    regressor,
+    classifier,
+    frame: pd.DataFrame,
+    feature_cols: list[str],
+    metadata: dict[str, float],
+) -> dict[str, float]:
+    """Score one out-of-time frame with point, haul, and ranking metrics."""
+    raw_points = regressor.predict(frame[feature_cols])
+    points = raw_points * metadata["point_slope"] + metadata["point_intercept"]
+    raw_haul = classifier.predict_proba(frame[feature_cols])[:, 1]
+    haul = apply_haul_calibration(raw_haul, metadata)
+    rank_scores = inference_rank_scores(points, haul, metadata["rank_haul_weight"])
+    actual = frame[TARGET_COL].to_numpy(dtype=float)
+    gameweeks = frame["gameweek"].to_numpy()
+    positions = frame["position"].to_numpy()
+    haul_outcomes = (actual >= HAUL_THRESHOLD).astype(int)
+    early = gameweeks <= 3
+
+    return {
+        "mae": float(mean_absolute_error(actual, points)),
+        "brier_score": float(brier_score_loss(haul_outcomes, haul)),
+        "ndcg_at_15": mean_gameweek_ndcg(actual, rank_scores, gameweeks),
+        "haul_recall_at_15": haul_recall_at_k(actual, rank_scores, gameweeks),
+        "early_mae": float(mean_absolute_error(actual[early], points[early])),
+        "early_ndcg_at_15": mean_gameweek_ndcg(
+            actual[early], rank_scores[early], gameweeks[early]
+        ),
+        "early_haul_recall_at_15": haul_recall_at_k(
+            actual[early], rank_scores[early], gameweeks[early]
+        ),
+        "early_fwd_haul_recall_at_15": haul_recall_at_k(
+            actual[early],
+            rank_scores[early],
+            gameweeks[early],
+            cohort=positions[early] == 4,
+        ),
+        "early_fwd_haul_ndcg": mean_gameweek_forward_haul_ndcg(
+            actual[early], rank_scores[early], gameweeks[early], positions[early]
+        ),
+    }
+
+
+def _train_quality_candidate(
+    train: pd.DataFrame,
+    validation: pd.DataFrame,
+    completed_test: pd.DataFrame,
+    outer_test: pd.DataFrame,
+    feature_cols: list[str],
+    hyperparams: dict | None = None,
+) -> tuple[dict[str, float], dict[str, float]]:
+    """Train, calibrate, and score one out-of-time model candidate."""
+    regression_params = {**DEFAULT_HYPERPARAMS, **(hyperparams or {})}
+    regression_params["early_stopping_rounds"] = QUALITY_EARLY_STOPPING_ROUNDS
+    classifier_params = HAUL_CLASSIFIER_HYPERPARAMS.copy()
+    classifier_params["early_stopping_rounds"] = QUALITY_EARLY_STOPPING_ROUNDS
+    if hyperparams:
+        classifier_params.update(
+            {
+                key: value
+                for key, value in hyperparams.items()
+                if key in {"n_estimators", "max_depth", "learning_rate"}
+            }
+        )
+
+    regressor = xgb.XGBRegressor(**regression_params)
+    regressor.fit(
+        train[feature_cols],
+        train[TARGET_COL],
+        eval_set=[(validation[feature_cols], validation[TARGET_COL])],
+        verbose=False,
+    )
+
+    classifier = xgb.XGBClassifier(**classifier_params)
+    classifier.fit(
+        train[feature_cols],
+        (train[TARGET_COL] >= HAUL_THRESHOLD).astype(int),
+        eval_set=[
+            (
+                validation[feature_cols],
+                (validation[TARGET_COL] >= HAUL_THRESHOLD).astype(int),
+            )
+        ],
+        verbose=False,
+    )
+
+    validation_points = regressor.predict(validation[feature_cols])
+    validation_haul = classifier.predict_proba(validation[feature_cols])[:, 1]
+    metadata = {
+        **fit_point_calibration(validation_points, validation[TARGET_COL]),
+        **fit_haul_calibration(
+            validation_haul,
+            (validation[TARGET_COL] >= HAUL_THRESHOLD).astype(int),
+        ),
+        "regression_n_estimators": int(regressor.best_iteration) + 1,
+        "classifier_n_estimators": int(classifier.best_iteration) + 1,
+    }
+    calibrated_points = (
+        validation_points * metadata["point_slope"] + metadata["point_intercept"]
+    )
+    calibrated_haul = apply_haul_calibration(validation_haul, metadata)
+    metadata["rank_haul_weight"] = select_rank_weight(
+        calibrated_points,
+        calibrated_haul,
+        validation[TARGET_COL],
+        validation["gameweek"],
+    )
+    metrics = score_backtest_predictions(
+        regressor, classifier, completed_test, feature_cols, metadata
+    )
+    outer_metrics = score_backtest_predictions(
+        regressor, classifier, outer_test, feature_cols, metadata
+    )
+    for key in (
+        "early_mae",
+        "early_ndcg_at_15",
+        "early_haul_recall_at_15",
+        "early_fwd_haul_recall_at_15",
+        "early_fwd_haul_ndcg",
+    ):
+        metrics[key] = outer_metrics[key]
+    return metrics, metadata
+
+
+def run_quality_gate(
+    df: pd.DataFrame,
+    hyperparams: dict | None = None,
+) -> dict:
+    """Compare fresh v4 and v5 models on identical fixed-season splits."""
+    validate_features(df)
+    train, validation, completed_test, outer_test = split_quality_gate_seasons(df)
+    baseline_features = [
+        feature for feature in FEATURE_COLS if feature not in MODEL_V5_FEATURES
+    ]
+    baseline_metrics, _ = _train_quality_candidate(
+        train,
+        validation,
+        completed_test,
+        outer_test,
+        baseline_features,
+        hyperparams,
+    )
+    candidate_metrics, metadata = _train_quality_candidate(
+        train,
+        validation,
+        completed_test,
+        outer_test,
+        FEATURE_COLS,
+        hyperparams,
+    )
+    gate = evaluate_quality_gates(baseline_metrics, candidate_metrics)
+    return {
+        **gate,
+        "baseline": baseline_metrics,
+        "candidate": {**candidate_metrics, "metadata": metadata},
+    }
+
+
+def save_model_metadata(metadata: dict, output_path: str) -> str:
     """Save calibration and ranking parameters beside the model."""
     path = Path(output_path)
     output_dir = path if path.suffix == "" else path.parent
@@ -702,6 +992,7 @@ def evaluate_haul_classifier(
         "recall": recall_score(y_test, predictions, zero_division=0),
         "f1": f1_score(y_test, predictions, zero_division=0),
         "roc_auc": roc_auc_score(y_test, probabilities),
+        "brier_score": brier_score_loss(y_test, probabilities),
     }
 
     logger.info("Haul Classifier Evaluation Metrics:")
@@ -710,6 +1001,7 @@ def evaluate_haul_classifier(
     logger.info(f"  Recall:    {metrics['recall']:.3f}")
     logger.info(f"  F1 Score:  {metrics['f1']:.3f}")
     logger.info(f"  ROC AUC:   {metrics['roc_auc']:.3f}")
+    logger.info(f"  Brier:     {metrics['brier_score']:.3f}")
 
     return metrics
 
@@ -817,6 +1109,16 @@ def main():
         default=10,
         help="Points threshold for haul classification (default: 10)",
     )
+    parser.add_argument(
+        "--quality-gate",
+        action="store_true",
+        help="Compare the candidate with the baseline on the current outer holdout",
+    )
+    parser.add_argument(
+        "--refit-all",
+        action="store_true",
+        help="Refit release models on five completed seasons after the gate passes",
+    )
 
     # Split strategy
     split_group = parser.add_mutually_exclusive_group()
@@ -849,6 +1151,8 @@ def main():
 
     if not args.data_path and not args.data_dir:
         parser.error("Either --data-path or --data-dir is required")
+    if args.quality_gate and args.haul_threshold != HAUL_THRESHOLD:
+        parser.error(f"--quality-gate requires --haul-threshold {HAUL_THRESHOLD}")
 
     use_temporal = not args.random_split
 
@@ -863,13 +1167,23 @@ def main():
     df = load_training_data(data_path=args.data_path, data_dir=args.data_dir)
     logger.info(f"Loaded {len(df)} training samples")
 
+    quality_report = None
+    if args.refit_all and not args.quality_gate:
+        parser.error("--refit-all requires --quality-gate")
+
     # Run hyperparameter tuning if requested
     if args.tune:
         logger.info("=" * 50)
         logger.info("Hyperparameter Tuning")
         logger.info("=" * 50)
+        tuning_df = df
+        if args.quality_gate:
+            quality_train, quality_validation, _, _ = split_quality_gate_seasons(df)
+            tuning_df = pd.concat(
+                [quality_train, quality_validation], ignore_index=True
+            )
         best_params = tune_hyperparameters(
-            df,
+            tuning_df,
             n_trials=args.n_trials,
             test_fraction=args.test_size,
             temporal=use_temporal,
@@ -895,8 +1209,42 @@ def main():
         logger.info("Training Final Model with Best Parameters")
         logger.info("=" * 50)
 
+    if args.quality_gate:
+        quality_report = run_quality_gate(df, hyperparams)
+        output_dir = Path(args.output_path)
+        if output_dir.suffix != "":
+            output_dir = output_dir.parent
+        output_dir.mkdir(parents=True, exist_ok=True)
+        quality_path = output_dir / "quality_report.json"
+        with open(quality_path, "w") as quality_file:
+            json.dump(quality_report, quality_file, indent=2)
+        logger.info(f"Quality report saved to {quality_path}")
+        if not quality_report["passed"]:
+            failed = [
+                name for name, passed in quality_report["checks"].items() if not passed
+            ]
+            raise SystemExit(f"Model quality gate failed: {', '.join(failed)}")
+        if not args.refit_all:
+            return
+
     # Train model
-    if use_temporal:
+    if args.refit_all:
+        validate_features(df)
+        quality_train, quality_validation, completed_test, _ = (
+            split_quality_gate_seasons(df)
+        )
+        refit_df = pd.concat(
+            [quality_train, quality_validation, completed_test], ignore_index=True
+        )
+        refit_params = {**DEFAULT_HYPERPARAMS, **hyperparams}
+        refit_params["n_estimators"] = int(
+            quality_report["candidate"]["metadata"]["regression_n_estimators"]
+        )
+        model = xgb.XGBRegressor(**refit_params)
+        model.fit(refit_df[FEATURE_COLS], refit_df[TARGET_COL], verbose=False)
+        X_test = refit_df[FEATURE_COLS]
+        y_test = refit_df[TARGET_COL]
+    elif use_temporal:
         model, X_test, y_test, split_info = train_model_temporal(
             df, hyperparams=hyperparams, test_fraction=args.test_size
         )
@@ -911,12 +1259,25 @@ def main():
 
     # Save model
     model_path = save_model(model, args.output_path)
-    model_metadata = {
-        **fit_point_calibration(model.predict(X_test), y_test),
-        "haul_slope": 1.0,
-        "haul_intercept": 0.0,
-        "rank_haul_weight": 1.5,
-    }
+    model_metadata = (
+        quality_report["candidate"]["metadata"].copy()
+        if quality_report
+        else {
+            **fit_point_calibration(model.predict(X_test), y_test),
+            "haul_slope": 1.0,
+            "haul_intercept": 0.0,
+            "rank_haul_weight": 1.5,
+        }
+    )
+    model_metadata.update(
+        {
+            "feature_version": FEATURE_VERSION,
+            "feature_count": len(FEATURE_COLS),
+            "trained_through": (
+                QUALITY_COMPLETED_TEST_SEASON if args.refit_all else None
+            ),
+        }
+    )
     haul_model_path = None
 
     logger.info("Regression model training complete!")
@@ -929,12 +1290,29 @@ def main():
         logger.info("Training Haul Probability Classifier")
         logger.info("=" * 50)
 
-        haul_model, X_test_haul, y_test_haul = train_haul_classifier(
-            df,
-            test_size=args.test_size,
-            haul_threshold=args.haul_threshold,
-            temporal=use_temporal,
-        )
+        if args.refit_all:
+            haul_params = HAUL_CLASSIFIER_HYPERPARAMS.copy()
+            haul_params.update(
+                {
+                    key: value
+                    for key, value in hyperparams.items()
+                    if key in {"n_estimators", "max_depth", "learning_rate"}
+                }
+            )
+            haul_params["n_estimators"] = int(
+                quality_report["candidate"]["metadata"]["classifier_n_estimators"]
+            )
+            haul_model = xgb.XGBClassifier(**haul_params)
+            X_test_haul = refit_df[FEATURE_COLS]
+            y_test_haul = (refit_df[TARGET_COL] >= args.haul_threshold).astype(int)
+            haul_model.fit(X_test_haul, y_test_haul, verbose=False)
+        else:
+            haul_model, X_test_haul, y_test_haul = train_haul_classifier(
+                df,
+                test_size=args.test_size,
+                haul_threshold=args.haul_threshold,
+                temporal=use_temporal,
+            )
 
         haul_metrics = evaluate_haul_classifier(haul_model, X_test_haul, y_test_haul)
 
@@ -949,20 +1327,24 @@ def main():
         logger.info(f"Haul classifier saved to {haul_model_path}")
 
         raw_haul_probabilities = haul_model.predict_proba(X_test_haul)[:, 1]
-        model_metadata.update(fit_haul_calibration(raw_haul_probabilities, y_test_haul))
-        calibrated_haul_probabilities = apply_haul_calibration(
-            raw_haul_probabilities, model_metadata
-        )
-        calibrated_points = (
-            model.predict(X_test_haul) * model_metadata["point_slope"]
-            + model_metadata["point_intercept"]
-        )
-        actual_points = df.loc[X_test_haul.index, TARGET_COL]
-        model_metadata["rank_haul_weight"] = select_rank_weight(
-            calibrated_points,
-            calibrated_haul_probabilities,
-            actual_points,
-        )
+        if not quality_report:
+            model_metadata.update(
+                fit_haul_calibration(raw_haul_probabilities, y_test_haul)
+            )
+            calibrated_haul_probabilities = apply_haul_calibration(
+                raw_haul_probabilities, model_metadata
+            )
+            calibrated_points = (
+                model.predict(X_test_haul) * model_metadata["point_slope"]
+                + model_metadata["point_intercept"]
+            )
+            actual_points = df.loc[X_test_haul.index, TARGET_COL]
+            model_metadata["rank_haul_weight"] = select_rank_weight(
+                calibrated_points,
+                calibrated_haul_probabilities,
+                actual_points,
+                df.loc[X_test_haul.index, "gameweek"],
+            )
 
         logger.info(f"Haul classifier ROC AUC: {haul_metrics['roc_auc']:.3f}")
 

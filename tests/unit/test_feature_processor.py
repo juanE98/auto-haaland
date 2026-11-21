@@ -17,7 +17,9 @@ from lambdas.common.feature_config import (
 from lambdas.feature_processor.handler import (
     engineer_features,
     get_opponent_info,
+    get_team_fixtures,
     get_team_strength,
+    get_upcoming_fixtures,
     handler,
     load_player_histories_from_s3,
     save_features_to_s3,
@@ -267,6 +269,20 @@ class TestGetOpponentInfo:
 
         assert result[0] == 5
 
+    def test_ignores_unscheduled_fixture_for_requested_gameweek(self):
+        fixtures = [
+            {"event": None, "team_h": 1, "team_a": 2},
+            {"event": 2, "team_h": 1, "team_a": 3},
+        ]
+        teams = [
+            {"id": 2, "strength": 2},
+            {"id": 3, "strength": 5},
+        ]
+
+        result = get_opponent_info(1, fixtures, teams, gameweek=2)
+
+        assert result[0] == 5
+
     def test_prefers_fixture_difficulty_over_missing_team_strength(self):
         fixtures = [
             {
@@ -282,6 +298,30 @@ class TestGetOpponentInfo:
         result = get_opponent_info(1, fixtures, teams, gameweek=1)
 
         assert result[0] == 4
+
+
+def test_get_team_fixtures_ignores_unscheduled_fixture():
+    fixtures = [
+        {"event": None, "team_h": 1, "team_a": 2},
+        {"event": 1, "team_h": 1, "team_a": 3},
+        {"event": 2, "team_h": 4, "team_a": 1},
+    ]
+
+    result = get_team_fixtures(fixtures, team_id=1, before_gw=3)
+
+    assert [fixture["event"] for fixture in result] == [2, 1]
+
+
+def test_get_upcoming_fixtures_ignores_unscheduled_fixture():
+    fixtures = [
+        {"event": None, "team_h": 1, "team_a": 2},
+        {"event": 2, "team_h": 1, "team_a": 3},
+        {"event": 3, "team_h": 4, "team_a": 1},
+    ]
+
+    result = get_upcoming_fixtures(fixtures, team_id=1, current_gw=2)
+
+    assert [fixture["event"] for fixture in result] == [2, 3]
 
 
 class TestEngineerFeatures:
@@ -422,7 +462,7 @@ class TestEngineerFeatures:
         """Test feature engineering in historical mode."""
         df = engineer_features(
             bootstrap=sample_bootstrap,
-            fixtures=sample_fixtures,
+            fixtures=[{**fixture, "event": 20} for fixture in sample_fixtures],
             player_histories=sample_histories,
             mode="historical",
             gameweek=20,
@@ -480,7 +520,7 @@ class TestEngineerFeatures:
         """Test interaction feature calculation."""
         df = engineer_features(
             bootstrap=sample_bootstrap,
-            fixtures=sample_fixtures,
+            fixtures=[{**fixture, "event": 10} for fixture in sample_fixtures],
             player_histories={},
             mode="prediction",
             gameweek=10,
@@ -491,10 +531,10 @@ class TestEngineerFeatures:
         # 8.5 * 4 = 34.0
         assert salah["form_x_difficulty"] == pytest.approx(34.0, rel=0.01)
 
-    def test_engineer_features_produces_all_94_features(
+    def test_engineer_features_produces_all_109_features(
         self, sample_bootstrap, sample_fixtures, sample_histories
     ):
-        """Test that engineer_features produces all 94 ML features.
+        """Test that engineer_features produces all 109 ML features.
 
         This is a regression test to ensure the feature processor
         computes all feature categories and doesn't regress to fewer features.
@@ -532,13 +572,13 @@ class TestEngineerFeatures:
             c for c in df.columns if c not in metadata_cols + target_cols
         ]
         assert (
-            len(feature_cols_in_df) == 94
-        ), f"Expected 94 features, got {len(feature_cols_in_df)}"
+            len(feature_cols_in_df) == 109
+        ), f"Expected 109 features, got {len(feature_cols_in_df)}"
 
     def test_engineer_features_no_history_produces_all_features(
         self, sample_bootstrap, sample_fixtures
     ):
-        """Test that all 94 features are produced even without player history.
+        """Test that all 109 features are produced even without player history.
 
         Ensures the fallback paths also compute all feature categories.
         """
@@ -559,6 +599,136 @@ class TestEngineerFeatures:
         assert (
             len(missing_features) == 0
         ), f"Missing {len(missing_features)} features: {sorted(missing_features)}"
+
+    def test_engineer_features_uses_prior_and_aggregated_history_count(
+        self, sample_bootstrap, sample_fixtures
+    ):
+        summaries = {
+            350: {
+                "history": [
+                    {"round": 1, "total_points": 8, "minutes": 90},
+                    {"round": 1, "total_points": 3, "minutes": 70},
+                    {"round": 2, "total_points": 2, "minutes": 90},
+                ],
+                "history_past": [
+                    {
+                        "season_name": "2025/26",
+                        "total_points": 200,
+                        "minutes": 2250,
+                        "goals_scored": 20,
+                        "assists": 10,
+                        "bonus": 30,
+                        "ict_index": "180.0",
+                    }
+                ],
+            },
+            328: {
+                "history": [],
+                "history_past": [
+                    {
+                        "season_name": "2025/26",
+                        "minutes": 1800,
+                        "ict_index": "160.0",
+                    }
+                ],
+            },
+        }
+
+        df = engineer_features(
+            bootstrap=sample_bootstrap,
+            fixtures=sample_fixtures,
+            player_histories=summaries,
+            mode="prediction",
+            gameweek=3,
+        )
+
+        salah = df[df["player_id"] == 350].iloc[0]
+        assert salah["history_game_count"] == 2
+        assert salah["points_last_1"] == 2
+        assert salah["points_last_3"] == pytest.approx(6.5)
+        assert salah["prior_points_per_90"] == pytest.approx(8.0)
+        assert salah["prior_fwd_ict_per_90"] == 0.0
+        assert salah["prior_season_available"] == 1.0
+        haaland = df[df["player_id"] == 328].iloc[0]
+        assert haaland["prior_fwd_ict_per_90"] == pytest.approx(8.0)
+
+    def test_live_team_priors_average_dgw_and_exclude_unscheduled_fixtures(self):
+        bootstrap = {
+            "elements": [
+                {"id": 10, "web_name": "Target", "team": 1, "element_type": 3},
+                {"id": 20, "web_name": "Opponent A", "team": 2, "element_type": 2},
+                {"id": 30, "web_name": "Opponent B", "team": 3, "element_type": 2},
+                {"id": 40, "web_name": "No Prior", "team": 4, "element_type": 4},
+                {"id": 50, "web_name": "Unscheduled", "team": 5, "element_type": 2},
+            ],
+            "teams": [{"id": team_id, "strength": 3} for team_id in range(1, 6)],
+        }
+        summaries = {
+            10: {
+                "history": [],
+                "history_past": [
+                    {"minutes": 1800, "goals_scored": 38, "goals_conceded": 30}
+                ],
+            },
+            20: {
+                "history": [],
+                "history_past": [
+                    {"minutes": 900, "goals_scored": 10, "goals_conceded": 18}
+                ],
+            },
+            30: {
+                "history": [],
+                "history_past": [
+                    {"minutes": 1800, "goals_scored": 20, "goals_conceded": 20}
+                ],
+            },
+            40: {"history": [], "history_past": []},
+            50: {
+                "history": [],
+                "history_past": [
+                    {"minutes": 900, "goals_scored": 10, "goals_conceded": 90}
+                ],
+            },
+        }
+        fixtures = [
+            {"event": 6, "team_h": 1, "team_a": 2},
+            {"event": 6, "team_h": 3, "team_a": 1},
+            {"event": None, "team_h": 1, "team_a": 5},
+        ]
+
+        with (
+            patch(
+                "lambdas.feature_processor.handler.get_team_fixtures", return_value=[]
+            ),
+            patch(
+                "lambdas.feature_processor.handler.get_upcoming_fixtures",
+                return_value=[],
+            ),
+        ):
+            result = engineer_features(bootstrap, fixtures, summaries, "prediction", 6)
+
+        target = result[result["player_id"] == 10].iloc[0]
+        assert target["prior_team_goals_per_match"] == pytest.approx(1.0)
+        assert target["prior_team_squad_minutes"] == 1800
+        assert target["prior_team_context_available"] == 1.0
+        assert target["prior_opponent_goals_conceded_per_90"] == pytest.approx(1.4)
+        assert target["prior_opponent_squad_minutes"] == pytest.approx(1350)
+        assert target["prior_opponent_context_available"] == 1.0
+
+        missing = result[result["player_id"] == 40].iloc[0]
+        assert (
+            missing[
+                [
+                    "prior_team_goals_per_match",
+                    "prior_team_squad_minutes",
+                    "prior_team_context_available",
+                    "prior_opponent_goals_conceded_per_90",
+                    "prior_opponent_squad_minutes",
+                    "prior_opponent_context_available",
+                ]
+            ].tolist()
+            == [0.0] * 6
+        )
 
 
 class TestFeatureProcessorHandler:
@@ -668,7 +838,10 @@ class TestLoadPlayerHistoriesFromS3:
         """Test loading the combined player histories JSON file."""
         mock_s3 = Mock()
         combined_data = {
-            "350": {"history": [{"round": 1, "total_points": 8}]},
+            "350": {
+                "history": [{"round": 1, "total_points": 8}],
+                "history_past": [{"season_name": "2025/26", "total_points": 200}],
+            },
             "328": {"history": [{"round": 1, "total_points": 12}]},
         }
         mock_s3.get_object.return_value = {
@@ -682,8 +855,11 @@ class TestLoadPlayerHistoriesFromS3:
         # Keys should be converted to int
         assert 350 in result
         assert 328 in result
-        assert result[350] == [{"round": 1, "total_points": 8}]
-        assert result[328] == [{"round": 1, "total_points": 12}]
+        assert result[350] == combined_data["350"]
+        assert result[328] == {
+            "history": [{"round": 1, "total_points": 12}],
+            "history_past": [],
+        }
 
         # Should have tried the combined file
         mock_s3.get_object.assert_called_once_with(
@@ -727,7 +903,7 @@ class TestLoadPlayerHistoriesFromS3:
         result = load_player_histories_from_s3(mock_s3, "test-bucket", 20, "2024_25")
 
         assert 350 in result
-        assert result[350] == [{"round": 1}]
+        assert result[350] == {"history": [{"round": 1}], "history_past": []}
 
     def test_string_to_int_key_conversion(self):
         """Test that JSON string keys are converted to int player IDs."""
