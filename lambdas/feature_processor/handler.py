@@ -323,8 +323,9 @@ def engineer_features(
             rolling["points_last_3"] = form
             rolling["points_last_5"] = form
 
-        # Form score from bootstrap
-        form_score = float(player.get("form", 0) or 0)
+        # Match the training builders, which define form as points_last_5.
+        # Without history, rolling already falls back to bootstrap form.
+        form_score = rolling["points_last_5"]
 
         # Selected by percent (ownership)
         selected_by_percent = float(player.get("selected_by_percent", 0) or 0)

@@ -531,6 +531,26 @@ class TestEngineerFeatures:
         # 8.5 * 4 = 34.0
         assert salah["form_x_difficulty"] == pytest.approx(34.0, rel=0.01)
 
+    def test_engineer_features_form_matches_training_definition(
+        self, sample_bootstrap, sample_fixtures, sample_histories
+    ):
+        """Live form uses points_last_5, as training does, not bootstrap form."""
+        df = engineer_features(
+            bootstrap=sample_bootstrap,
+            fixtures=[{**fixture, "event": 21} for fixture in sample_fixtures],
+            player_histories=sample_histories,
+            mode="prediction",
+            gameweek=21,
+        )
+
+        salah = df[df["player_id"] == 350].iloc[0]
+        # Mean of 8, 12 and 6, not the bootstrap form of 8.5
+        assert salah["points_last_5"] == pytest.approx(8.67)
+        assert salah["form_score"] == salah["points_last_5"]
+        assert salah["form_x_difficulty"] == pytest.approx(
+            salah["points_last_5"] * salah["opponent_strength"], abs=0.01
+        )
+
     def test_engineer_features_produces_all_109_features(
         self, sample_bootstrap, sample_fixtures, sample_histories
     ):
