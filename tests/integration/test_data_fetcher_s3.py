@@ -92,7 +92,14 @@ class TestDataFetcherS3Integration:
         mock_fpl = MagicMock()
         mock_fpl.get_season_string.return_value = "2024_25"
         mock_fpl.get_bootstrap_static.return_value = {
-            "events": [{"id": 20, "finished": False}],
+            "events": [
+                {"id": 19, "finished": True},
+                {
+                    "id": 20,
+                    "finished": False,
+                    "deadline_time": "2099-01-01T00:00:00Z",
+                },
+            ],
             "elements": [{"id": 350, "web_name": "Salah"}],
         }
         mock_fpl.get_fixtures.return_value = [{"id": 1, "event": 20}]
@@ -142,7 +149,14 @@ class TestDataFetcherS3Integration:
         mock_fpl = MagicMock()
         mock_fpl.get_season_string.return_value = "2024_25"
         mock_fpl.get_bootstrap_static.return_value = {
-            "events": [],
+            "events": [
+                {"id": 19, "finished": True},
+                {
+                    "id": 20,
+                    "finished": False,
+                    "deadline_time": "2099-01-01T00:00:00Z",
+                },
+            ],
             "elements": [
                 {"id": 350, "web_name": "Salah"},
                 {"id": 328, "web_name": "Haaland"},

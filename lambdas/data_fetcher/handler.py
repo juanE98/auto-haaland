@@ -29,6 +29,40 @@ PLAYER_BATCH_SIZE = 50
 PLAYER_BATCH_DELAY = 1.0  # Seconds between batches
 
 
+class PredictionWindowError(ValueError):
+    """Raised when a live prediction would use incomplete or late data."""
+
+
+def validate_prediction_window(
+    bootstrap: Dict[str, Any],
+    gameweek: int,
+    now: datetime | None = None,
+) -> None:
+    """Require a future target deadline and a completed previous gameweek."""
+    events = {event["id"]: event for event in bootstrap.get("events", [])}
+    target = events.get(gameweek)
+    if target is None or not target.get("deadline_time"):
+        raise PredictionWindowError(f"Missing deadline for target gameweek {gameweek}")
+
+    try:
+        deadline = datetime.fromisoformat(
+            target["deadline_time"].replace("Z", "+00:00")
+        )
+        if deadline.utcoffset() is None:
+            raise ValueError("deadline has no timezone")
+    except (AttributeError, TypeError, ValueError) as error:
+        raise PredictionWindowError(
+            f"Invalid deadline for target gameweek {gameweek}"
+        ) from error
+    if deadline <= (now or datetime.now(timezone.utc)):
+        raise PredictionWindowError(f"Target gameweek {gameweek} deadline has passed")
+
+    if gameweek > 1 and not events.get(gameweek - 1, {}).get("finished", False):
+        raise PredictionWindowError(
+            f"Cannot predict gameweek {gameweek} until the previous gameweek is finished"
+        )
+
+
 def save_to_s3(s3_client, bucket: str, key: str, data: Dict[str, Any]) -> None:
     """
     Save JSON data to S3.
@@ -99,6 +133,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             # === 1. Fetch and save bootstrap-static ===
             logger.info("Fetching bootstrap-static data...")
             bootstrap = fpl.get_bootstrap_static()
+            validate_prediction_window(bootstrap, gameweek)
 
             bootstrap_key = f"raw/season_{season}/gw{gameweek}_bootstrap.json"
             save_to_s3(s3_client, BUCKET_NAME, bootstrap_key, bootstrap)
@@ -171,6 +206,10 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 .isoformat()
                 .replace("+00:00", "Z"),
             }
+
+    except PredictionWindowError:
+        logger.error("Prediction window validation failed", exc_info=True)
+        raise
 
     except FPLApiError as e:
         logger.error(f"FPL API error: {e}")

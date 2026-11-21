@@ -3,11 +3,75 @@ Unit tests for data_fetcher Lambda handler.
 """
 
 import json
-from unittest.mock import MagicMock, Mock, call, patch
+from datetime import datetime, timezone
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
-from lambdas.data_fetcher.handler import PLAYER_BATCH_SIZE, handler, save_to_s3
+import lambdas.data_fetcher.handler as data_fetcher
+from lambdas.data_fetcher.handler import handler, save_to_s3
+
+
+def prediction_events(gameweek):
+    events = []
+    if gameweek > 1:
+        events.append({"id": gameweek - 1, "finished": True})
+    events.append(
+        {
+            "id": gameweek,
+            "finished": False,
+            "deadline_time": "2099-08-31T12:00:00Z",
+        }
+    )
+    return events
+
+
+class TestPredictionWindow:
+    def test_rejects_when_previous_gameweek_is_unfinished(self):
+        bootstrap = {
+            "events": [
+                {"id": 1, "finished": False},
+                {"id": 2, "deadline_time": "2099-08-31T12:00:00Z"},
+            ]
+        }
+
+        with pytest.raises(ValueError, match="previous gameweek"):
+            data_fetcher.validate_prediction_window(bootstrap, 2)
+
+    def test_rejects_after_target_deadline(self):
+        bootstrap = {
+            "events": [
+                {"id": 1, "deadline_time": "2026-08-01T12:00:00Z"},
+            ]
+        }
+
+        with pytest.raises(ValueError, match="deadline"):
+            data_fetcher.validate_prediction_window(
+                bootstrap,
+                1,
+                now=datetime(2026, 8, 2, tzinfo=timezone.utc),
+            )
+
+    def test_rejects_malformed_target_deadline(self):
+        bootstrap = {"events": [{"id": 1, "deadline_time": "not-a-date"}]}
+
+        with pytest.raises(
+            data_fetcher.PredictionWindowError, match="Invalid deadline"
+        ):
+            data_fetcher.validate_prediction_window(bootstrap, 1)
+
+    def test_allows_gw1_before_deadline(self):
+        bootstrap = {
+            "events": [
+                {"id": 1, "deadline_time": "2026-08-03T12:00:00Z"},
+            ]
+        }
+
+        data_fetcher.validate_prediction_window(
+            bootstrap,
+            1,
+            now=datetime(2026, 8, 2, tzinfo=timezone.utc),
+        )
 
 
 class TestDataFetcherHandler:
@@ -24,7 +88,10 @@ class TestDataFetcherHandler:
         # Mock FPL client
         mock_fpl = MagicMock()
         mock_fpl.get_season_string.return_value = "2024_25"
-        mock_fpl.get_bootstrap_static.return_value = {"events": [], "elements": []}
+        mock_fpl.get_bootstrap_static.return_value = {
+            "events": prediction_events(20),
+            "elements": [],
+        }
         mock_fpl.get_fixtures.return_value = [{"id": 1}]
         mock_fpl.__enter__.return_value = mock_fpl
         mock_fpl.__exit__.return_value = None
@@ -68,7 +135,7 @@ class TestDataFetcherHandler:
         mock_fpl.get_season_string.return_value = "2024_25"
         mock_fpl.get_current_gameweek.return_value = 22  # Auto-detected
         mock_fpl.get_bootstrap_static.return_value = {
-            "events": [],
+            "events": prediction_events(22),
             "elements": [],
         }
         mock_fpl.get_fixtures.return_value = []
@@ -101,7 +168,7 @@ class TestDataFetcherHandler:
         mock_fpl = MagicMock()
         mock_fpl.get_season_string.return_value = "2024_25"
         mock_fpl.get_bootstrap_static.return_value = {
-            "events": [],
+            "events": prediction_events(20),
             "elements": [
                 {"id": 350, "web_name": "Salah"},
                 {"id": 328, "web_name": "Haaland"},
@@ -204,7 +271,7 @@ class TestDataFetcherHandler:
         mock_fpl = MagicMock()
         mock_fpl.get_season_string.return_value = "2024_25"
         mock_fpl.get_bootstrap_static.return_value = {
-            "events": [],
+            "events": prediction_events(20),
             "elements": [{"id": 1, "web_name": "Player1"}],
         }
         mock_fpl.get_fixtures.return_value = []
@@ -232,7 +299,7 @@ class TestDataFetcherHandler:
         mock_fpl = MagicMock()
         mock_fpl.get_season_string.return_value = "2024_25"
         mock_fpl.get_bootstrap_static.return_value = {
-            "events": [],
+            "events": prediction_events(20),
             "elements": [{"id": 1, "web_name": "Player1"}],
         }
         mock_fpl.get_fixtures.return_value = []
@@ -264,7 +331,7 @@ class TestDataFetcherHandler:
         mock_fpl = MagicMock()
         mock_fpl.get_season_string.return_value = "2024_25"
         mock_fpl.get_bootstrap_static.return_value = {
-            "events": [],
+            "events": prediction_events(20),
             "elements": players,
         }
         mock_fpl.get_fixtures.return_value = []
