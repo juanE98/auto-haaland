@@ -105,7 +105,7 @@ auto-haaland/
 ├── lambdas/
 │   ├── common/              # Shared: FPL API client, AWS utilities, feature config
 │   ├── data_fetcher/        # Fetches bootstrap, fixtures, player histories to S3
-│   ├── feature_processor/   # Feature engineering from raw data to JSON
+│   ├── feature_processor/   # Feature engineering from raw data to Parquet
 │   ├── inference/           # Loads XGBoost model, runs predictions
 │   ├── prediction_loader/   # Batch writes predictions to DynamoDB
 │   └── api_handler/         # REST API (top, player, compare, predictions)
@@ -131,7 +131,7 @@ auto-haaland/
 ## Data Storage
 
 ```
-s3://fpl-ml-data/raw/season_YYYY_YY/
+s3://fpl-ml-data-{env}/raw/season_YYYY_YY/
 ├── gwN_bootstrap.json       # Players, teams, gameweeks
 ├── gwN_fixtures.json        # Fixtures for gameweek N
 └── gwN_players/
